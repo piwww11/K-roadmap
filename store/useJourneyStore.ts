@@ -25,18 +25,16 @@ import {
   INITIAL_BUDGET,
   INITIAL_ACHIEVEMENTS,
 } from './Speed data';
+import { TASK_SKILL_UNLOCKS } from './skillUnlocks';
 
 const STORAGE_VERSION = 3;
-// Keep the existing storage key so Zustand can migrate v2 data instead of silently starting over.
 const STORAGE_NAME = 'k-roadmap-storage-v2';
 
 const clampScore = (value: number) => Math.min(10, Math.max(0, value));
 
 function allTasks(phases: Phase[]): Task[] {
   return phases.flatMap((phase) =>
-    phase.months.flatMap((month) =>
-      month.goals.flatMap((goal) => goal.tasks)
-    )
+    phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks))
   );
 }
 
@@ -159,12 +157,13 @@ function recalculateSkills(
 
     const taskTriggered =
       completedTaskId !== undefined &&
-      allTasks(phases).some(
-        (task) =>
-          task.id === completedTaskId &&
-          task.status === 'Completed' &&
-          task.unlocksSkillIds?.includes(skill.id)
-      );
+      (TASK_SKILL_UNLOCKS[completedTaskId]?.includes(skill.id) === true ||
+        allTasks(phases).some(
+          (task) =>
+            task.id === completedTaskId &&
+            task.status === 'Completed' &&
+            task.unlocksSkillIds?.includes(skill.id)
+        ));
 
     if (hasExplicitRequirement || taskTriggered) {
       return {
@@ -177,8 +176,6 @@ function recalculateSkills(
     return skill;
   });
 
-  // Backward-compatible chain behavior for existing Speed data that has not
-  // yet been annotated with explicit dependencies.
   for (let index = 0; index < nextSkills.length; index += 1) {
     const current = nextSkills[index];
     if (current.status !== 'completed') continue;
@@ -208,7 +205,6 @@ function recalculateSkills(
 function migratePersistedState(persisted: unknown): unknown {
   if (!persisted || typeof persisted !== 'object') return persisted;
 
-  // Zustand passes the persisted object as { state, version }.
   const wrapper = persisted as Record<string, any>;
   const state =
     wrapper.state && typeof wrapper.state === 'object'
@@ -227,21 +223,18 @@ function migratePersistedState(persisted: unknown): unknown {
   }));
 
   const normalizedPhases = recalculatePhases(phases);
+  const migratedSkills = Array.isArray(state.skills) ? state.skills : INITIAL_SKILLS;
 
   return {
     ...state,
     phases: normalizedPhases,
     majors: recalculateMajors(normalizedPhases, migratedMajors),
-    skills: Array.isArray(state.skills) ? state.skills : INITIAL_SKILLS,
+    skills: recalculateSkills(normalizedPhases, migratedSkills),
     journalEntries: Array.isArray(state.journalEntries) ? state.journalEntries : [],
     budget:
-      state.budget && Array.isArray(state.budget.items)
-        ? state.budget
-        : INITIAL_BUDGET,
+      state.budget && Array.isArray(state.budget.items) ? state.budget : INITIAL_BUDGET,
     documents: Array.isArray(state.documents) ? state.documents : INITIAL_DOCUMENTS,
-    achievements: Array.isArray(state.achievements)
-      ? state.achievements
-      : INITIAL_ACHIEVEMENTS,
+    achievements: Array.isArray(state.achievements) ? state.achievements : INITIAL_ACHIEVEMENTS,
     majorDecisions: Array.isArray(state.majorDecisions) ? state.majorDecisions : [],
   };
 }
@@ -249,17 +242,12 @@ function migratePersistedState(persisted: unknown): unknown {
 export const useJourneyStore = create<JourneyState>()(
   persist(
     (set, get) => ({
-      // ============ META ============
       myWhy:
         'I want to understand what kind of person and scientist I want to become, and I want to give myself a real chance to study what I genuinely care about.',
-
       setMyWhy: (text) => set({ myWhy: text }),
 
-      // ============ ROADMAP ============
       phases: recalculatePhases(INITIAL_PHASES),
-
       getPhase: (phaseId) => get().phases.find((phase) => phase.id === phaseId),
-
       getMonth: (monthId) => {
         for (const phase of get().phases) {
           const month = phase.months.find((candidate) => candidate.id === monthId);
@@ -267,7 +255,6 @@ export const useJourneyStore = create<JourneyState>()(
         }
         return undefined;
       },
-
       getGoal: (goalId) => {
         for (const phase of get().phases) {
           for (const month of phase.months) {
@@ -277,17 +264,13 @@ export const useJourneyStore = create<JourneyState>()(
         }
         return undefined;
       },
-
       getTask: (taskId) => getTaskFromPhases(get().phases, taskId),
 
       toggleTask: (taskId) =>
         set((state) => {
           const currentTask = getTaskFromPhases(state.phases, taskId);
           if (!currentTask) return state;
-
-          const nextStatus: TaskStatus =
-            currentTask.status === 'Completed' ? 'Not Started' : 'Completed';
-
+          const nextStatus: TaskStatus = currentTask.status === 'Completed' ? 'Not Started' : 'Completed';
           const phases = recalculatePhases(
             state.phases.map((phase) => ({
               ...phase,
@@ -295,53 +278,31 @@ export const useJourneyStore = create<JourneyState>()(
                 ...month,
                 goals: month.goals.map((goal) => ({
                   ...goal,
-                  tasks: goal.tasks.map((task) =>
-                    task.id === taskId ? { ...task, status: nextStatus } : task
-                  ),
+                  tasks: goal.tasks.map((task) => task.id === taskId ? { ...task, status: nextStatus } : task),
                 })),
               })),
             }))
           );
-
           return {
             phases,
             majors: recalculateMajors(phases, state.majors),
-            skills: recalculateSkills(
-              phases,
-              state.skills,
-              nextStatus === 'Completed' ? taskId : undefined
-            ),
+            skills: recalculateSkills(phases, state.skills, nextStatus === 'Completed' ? taskId : undefined),
           };
         }),
 
       addTask: (goalId, task) =>
         set((state) => {
-          const newTask: Task = {
-            ...task,
-            id: `task-${Date.now()}`,
-            goalId,
-            createdAt: new Date().toISOString(),
-          };
-
+          const newTask: Task = { ...task, id: `task-${Date.now()}`, goalId, createdAt: new Date().toISOString() };
           const phases = recalculatePhases(
             state.phases.map((phase) => ({
               ...phase,
               months: phase.months.map((month) => ({
                 ...month,
-                goals: month.goals.map((goal) =>
-                  goal.id === goalId
-                    ? { ...goal, tasks: [...goal.tasks, newTask] }
-                    : goal
-                ),
+                goals: month.goals.map((goal) => goal.id === goalId ? { ...goal, tasks: [...goal.tasks, newTask] } : goal),
               })),
             }))
           );
-
-          return {
-            phases,
-            majors: recalculateMajors(phases, state.majors),
-            skills: recalculateSkills(phases, state.skills),
-          };
+          return { phases, majors: recalculateMajors(phases, state.majors), skills: recalculateSkills(phases, state.skills) };
         }),
 
       updateTask: (taskId, updates) =>
@@ -353,19 +314,12 @@ export const useJourneyStore = create<JourneyState>()(
                 ...month,
                 goals: month.goals.map((goal) => ({
                   ...goal,
-                  tasks: goal.tasks.map((task) =>
-                    task.id === taskId ? { ...task, ...updates } : task
-                  ),
+                  tasks: goal.tasks.map((task) => task.id === taskId ? { ...task, ...updates } : task),
                 })),
               })),
             }))
           );
-
-          return {
-            phases,
-            majors: recalculateMajors(phases, state.majors),
-            skills: recalculateSkills(phases, state.skills),
-          };
+          return { phases, majors: recalculateMajors(phases, state.majors), skills: recalculateSkills(phases, state.skills) };
         }),
 
       deleteTask: (taskId) =>
@@ -375,60 +329,33 @@ export const useJourneyStore = create<JourneyState>()(
               ...phase,
               months: phase.months.map((month) => ({
                 ...month,
-                goals: month.goals.map((goal) => ({
-                  ...goal,
-                  tasks: goal.tasks.filter((task) => task.id !== taskId),
-                })),
+                goals: month.goals.map((goal) => ({ ...goal, tasks: goal.tasks.filter((task) => task.id !== taskId) })),
               })),
             }))
           );
-
-          return {
-            phases,
-            majors: recalculateMajors(phases, state.majors),
-            skills: recalculateSkills(phases, state.skills),
-          };
+          return { phases, majors: recalculateMajors(phases, state.majors), skills: recalculateSkills(phases, state.skills) };
         }),
 
-      // ============ MAJORS ============
-      majors: INITIAL_MAJORS.map((major) => ({
-        ...major,
-        baseConfidenceScore: major.baseConfidenceScore ?? major.confidenceScore,
-      })),
-
+      majors: INITIAL_MAJORS.map((major) => ({ ...major, baseConfidenceScore: major.baseConfidenceScore ?? major.confidenceScore })),
       reorderMajors: (oldIndex, newIndex) =>
         set((state) => {
-          if (oldIndex < 0 || oldIndex >= state.majors.length) return state;
-          if (newIndex < 0 || newIndex >= state.majors.length) return state;
-
+          if (oldIndex < 0 || oldIndex >= state.majors.length || newIndex < 0 || newIndex >= state.majors.length) return state;
           const majors = [...state.majors];
           const [moved] = majors.splice(oldIndex, 1);
           if (!moved) return state;
           majors.splice(newIndex, 0, moved);
           return { majors };
         }),
-
       updateMajorScore: (majorId, type, score) =>
         set((state) => {
           const nextScore = clampScore(score);
           const rewards = taskRewardsByMajor(state.phases);
-
-          return {
-            majors: state.majors.map((major) => {
-              if (major.id !== majorId) return major;
-              if (type === 'interest') return { ...major, interestScore: nextScore };
-
-              return {
-                ...major,
-                baseConfidenceScore: nextScore,
-                confidenceScore: Math.round(
-                  clampScore(nextScore + (rewards.get(majorId) ?? 0)) * 10
-                ) / 10,
-              };
-            }),
-          };
+          return { majors: state.majors.map((major) => {
+            if (major.id !== majorId) return major;
+            if (type === 'interest') return { ...major, interestScore: nextScore };
+            return { ...major, baseConfidenceScore: nextScore, confidenceScore: Math.round(clampScore(nextScore + (rewards.get(majorId) ?? 0)) * 10) / 10 };
+          }) };
         }),
-
       getMajorConfidenceFromTasks: (majorId) => {
         const reward = taskRewardsByMajor(get().phases).get(majorId) ?? 0;
         const major = get().majors.find((candidate) => candidate.id === majorId);
@@ -436,249 +363,93 @@ export const useJourneyStore = create<JourneyState>()(
         return Math.round(clampScore(base + reward) * 10) / 10;
       },
 
-      // ============ SKILLS ============
       skills: INITIAL_SKILLS,
-
       updateSkillStatus: (skillId, status) =>
         set((state) => {
           const now = new Date().toISOString();
-          let skills = state.skills.map((skill) =>
-            skill.id === skillId
-              ? {
-                  ...skill,
-                  status,
-                  unlockedAt:
-                    status === 'not-started' && skill.status === 'locked'
-                      ? now
-                      : skill.unlockedAt,
-                  completedAt:
-                    status === 'completed' ? now : skill.completedAt,
-                }
-              : skill
-          );
-
+          let skills = state.skills.map((skill) => skill.id === skillId ? {
+            ...skill,
+            status,
+            unlockedAt: status === 'not-started' && skill.status === 'locked' ? now : skill.unlockedAt,
+            completedAt: status === 'completed' ? now : skill.completedAt,
+          } : skill);
           skills = recalculateSkills(state.phases, skills);
           return { skills };
         }),
 
-      // ============ JOURNAL ============
       journalEntries: [],
+      addJournalEntry: (entry) => set((state) => ({ journalEntries: [...state.journalEntries, { ...entry, id: `journal-${Date.now()}`, createdAt: new Date().toISOString() }] })),
+      updateJournalEntry: (entryId, updates) => set((state) => ({ journalEntries: state.journalEntries.map((entry) => entry.id === entryId ? { ...entry, ...updates } : entry) })),
+      deleteJournalEntry: (entryId) => set((state) => ({ journalEntries: state.journalEntries.filter((entry) => entry.id !== entryId) })),
+      getJournalByCategory: (category) => get().journalEntries.filter((entry) => entry.category === category),
 
-      addJournalEntry: (entry) =>
-        set((state) => ({
-          journalEntries: [
-            ...state.journalEntries,
-            {
-              ...entry,
-              id: `journal-${Date.now()}`,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-        })),
-
-      updateJournalEntry: (entryId, updates) =>
-        set((state) => ({
-          journalEntries: state.journalEntries.map((entry) =>
-            entry.id === entryId ? { ...entry, ...updates } : entry
-          ),
-        })),
-
-      deleteJournalEntry: (entryId) =>
-        set((state) => ({
-          journalEntries: state.journalEntries.filter((entry) => entry.id !== entryId),
-        })),
-
-      getJournalByCategory: (category) =>
-        get().journalEntries.filter((entry) => entry.category === category),
-
-      // ============ BUDGET ============
       budget: INITIAL_BUDGET,
+      addBudgetItem: (item: BudgetItem) => set((state) => ({ budget: { ...state.budget, items: [...state.budget.items, item] } })),
+      removeBudgetItem: (itemId) => set((state) => ({ budget: { ...state.budget, items: state.budget.items.filter((item) => item.id !== itemId) } })),
+      updateBudgetItem: (itemId, updates) => set((state) => ({ budget: { ...state.budget, items: state.budget.items.map((item) => item.id === itemId ? { ...item, ...updates } : item) } })),
+      setBudgetTarget: (amount) => set((state) => ({ budget: { ...state.budget, targetAmount: Math.max(0, amount) } })),
+      setCurrentSavings: (amount) => set((state) => ({ budget: { ...state.budget, currentSavings: Math.max(0, amount) } })),
 
-      addBudgetItem: (item: BudgetItem) =>
-        set((state) => ({
-          budget: { ...state.budget, items: [...state.budget.items, item] },
-        })),
-
-      removeBudgetItem: (itemId) =>
-        set((state) => ({
-          budget: {
-            ...state.budget,
-            items: state.budget.items.filter((item) => item.id !== itemId),
-          },
-        })),
-
-      updateBudgetItem: (itemId, updates) =>
-        set((state) => ({
-          budget: {
-            ...state.budget,
-            items: state.budget.items.map((item) =>
-              item.id === itemId ? { ...item, ...updates } : item
-            ),
-          },
-        })),
-
-      setBudgetTarget: (amount) =>
-        set((state) => ({
-          budget: { ...state.budget, targetAmount: Math.max(0, amount) },
-        })),
-
-      setCurrentSavings: (amount) =>
-        set((state) => ({
-          budget: { ...state.budget, currentSavings: Math.max(0, amount) },
-        })),
-
-      // ============ DOCUMENTS ============
       documents: INITIAL_DOCUMENTS,
+      updateDocumentStatus: (documentId, status) => set((state) => ({ documents: state.documents.map((doc) => doc.id === documentId ? { ...doc, status } : doc) })),
+      addDocument: (doc) => set((state) => ({ documents: [...state.documents, { ...doc, id: `doc-${Date.now()}` }] })),
+      deleteDocument: (documentId) => set((state) => ({ documents: state.documents.filter((doc) => doc.id !== documentId) })),
 
-      updateDocumentStatus: (documentId, status) =>
-        set((state) => ({
-          documents: state.documents.map((doc) =>
-            doc.id === documentId ? { ...doc, status } : doc
-          ),
-        })),
-
-      addDocument: (doc) =>
-        set((state) => ({
-          documents: [...state.documents, { ...doc, id: `doc-${Date.now()}` }],
-        })),
-
-      deleteDocument: (documentId) =>
-        set((state) => ({
-          documents: state.documents.filter((doc) => doc.id !== documentId),
-        })),
-
-      // ============ ACHIEVEMENTS ============
       achievements: INITIAL_ACHIEVEMENTS,
+      unlockAchievement: (achievementId) => set((state) => ({ achievements: state.achievements.map((achievement) => achievement.id === achievementId && !achievement.unlockedAt ? { ...achievement, unlockedAt: new Date().toISOString() } : achievement) })),
 
-      unlockAchievement: (achievementId) =>
-        set((state) => ({
-          achievements: state.achievements.map((achievement) =>
-            achievement.id === achievementId && !achievement.unlockedAt
-              ? { ...achievement, unlockedAt: new Date().toISOString() }
-              : achievement
-          ),
-        })),
-
-      // ============ MAJOR DECISION ============
       majorDecisions: [],
+      addMajorDecisionResponse: (response: MajorDecisionResponse) => set((state) => ({ majorDecisions: [...state.majorDecisions, response] })),
 
-      addMajorDecisionResponse: (response: MajorDecisionResponse) =>
-        set((state) => ({
-          majorDecisions: [...state.majorDecisions, response],
-        })),
-
-      // ============ PROGRESS & STATS ============
       getOverallProgress: () => {
         const tasks = allTasks(get().phases);
         if (tasks.length === 0) return 0;
-        return Math.round(
-          (tasks.filter((task) => task.status === 'Completed').length / tasks.length) * 100
-        );
+        return Math.round((tasks.filter((task) => task.status === 'Completed').length / tasks.length) * 100);
       },
-
       getPhaseProgress: (phaseId) => {
         const phase = get().phases.find((candidate) => candidate.id === phaseId);
         if (!phase) return 0;
-        const tasks = phase.months.flatMap((month) =>
-          month.goals.flatMap((goal) => goal.tasks)
-        );
+        const tasks = phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks));
         if (tasks.length === 0) return 0;
-        return Math.round(
-          (tasks.filter((task) => task.status === 'Completed').length / tasks.length) * 100
-        );
+        return Math.round((tasks.filter((task) => task.status === 'Completed').length / tasks.length) * 100);
       },
-
-      getCompletedTaskCount: () =>
-        allTasks(get().phases).filter((task) => task.status === 'Completed').length,
-
+      getCompletedTaskCount: () => allTasks(get().phases).filter((task) => task.status === 'Completed').length,
       getTotalTaskCount: () => allTasks(get().phases).length,
-
-      getCurrentPhase: () =>
-        get().phases.find((phase) => phase.status === 'In Progress') ?? get().phases[0],
-
+      getCurrentPhase: () => get().phases.find((phase) => phase.status === 'In Progress') ?? get().phases[0],
       getNextTask: () => {
-        for (const phase of get().phases) {
-          for (const month of phase.months) {
-            for (const goal of month.goals) {
-              const task = goal.tasks.find((candidate) => candidate.status !== 'Completed');
-              if (task) return task;
-            }
-          }
+        for (const phase of get().phases) for (const month of phase.months) for (const goal of month.goals) {
+          const task = goal.tasks.find((candidate) => candidate.status !== 'Completed');
+          if (task) return task;
         }
         return undefined;
       },
 
-      // ============ DATA MANAGEMENT ============
       exportData: () => {
         const state = get();
-        return JSON.stringify({
-          myWhy: state.myWhy,
-          phases: state.phases,
-          majors: state.majors,
-          skills: state.skills,
-          journalEntries: state.journalEntries,
-          budget: state.budget,
-          documents: state.documents,
-          achievements: state.achievements,
-          majorDecisions: state.majorDecisions,
-        });
+        return JSON.stringify({ myWhy: state.myWhy, phases: state.phases, majors: state.majors, skills: state.skills, journalEntries: state.journalEntries, budget: state.budget, documents: state.documents, achievements: state.achievements, majorDecisions: state.majorDecisions });
       },
-
       importData: (jsonString) => {
         try {
           const parsed = JSON.parse(jsonString) as Partial<JourneyState>;
-          if (!parsed || !Array.isArray(parsed.phases) || !Array.isArray(parsed.majors)) {
-            return false;
-          }
-
+          if (!parsed || !Array.isArray(parsed.phases) || !Array.isArray(parsed.majors)) return false;
           const phases = recalculatePhases(parsed.phases);
           const majors = recalculateMajors(phases, parsed.majors);
-          const skills = recalculateSkills(
-            phases,
-            Array.isArray(parsed.skills) ? parsed.skills : INITIAL_SKILLS
-          );
-
-          set({
-            myWhy: parsed.myWhy ?? get().myWhy,
-            phases,
-            majors,
-            skills,
-            journalEntries: Array.isArray(parsed.journalEntries) ? parsed.journalEntries : [],
-            budget:
-              parsed.budget && Array.isArray(parsed.budget.items)
-                ? parsed.budget
-                : get().budget,
-            documents: Array.isArray(parsed.documents) ? parsed.documents : get().documents,
-            achievements: Array.isArray(parsed.achievements)
-              ? parsed.achievements
-              : get().achievements,
-            majorDecisions: Array.isArray(parsed.majorDecisions)
-              ? parsed.majorDecisions
-              : [],
-          });
-
+          const skills = recalculateSkills(phases, Array.isArray(parsed.skills) ? parsed.skills : INITIAL_SKILLS);
+          set({ myWhy: parsed.myWhy ?? get().myWhy, phases, majors, skills, journalEntries: Array.isArray(parsed.journalEntries) ? parsed.journalEntries : [], budget: parsed.budget && Array.isArray(parsed.budget.items) ? parsed.budget : get().budget, documents: Array.isArray(parsed.documents) ? parsed.documents : get().documents, achievements: Array.isArray(parsed.achievements) ? parsed.achievements : get().achievements, majorDecisions: Array.isArray(parsed.majorDecisions) ? parsed.majorDecisions : [] });
           return true;
-        } catch {
-          return false;
-        }
+        } catch { return false; }
       },
-
-      resetData: () =>
-        set({
-          myWhy:
-            'I want to understand what kind of person and scientist I want to become, and I want to give myself a real chance to study what I genuinely care about.',
-          phases: recalculatePhases(INITIAL_PHASES),
-          majors: INITIAL_MAJORS.map((major) => ({
-            ...major,
-            baseConfidenceScore: major.baseConfidenceScore ?? major.confidenceScore,
-          })),
-          skills: INITIAL_SKILLS,
-          journalEntries: [],
-          budget: INITIAL_BUDGET,
-          documents: INITIAL_DOCUMENTS,
-          achievements: INITIAL_ACHIEVEMENTS,
-          majorDecisions: [],
-        }),
+      resetData: () => set({
+        myWhy: 'I want to understand what kind of person and scientist I want to become, and I want to give myself a real chance to study what I genuinely care about.',
+        phases: recalculatePhases(INITIAL_PHASES),
+        majors: INITIAL_MAJORS.map((major) => ({ ...major, baseConfidenceScore: major.baseConfidenceScore ?? major.confidenceScore })),
+        skills: INITIAL_SKILLS,
+        journalEntries: [],
+        budget: INITIAL_BUDGET,
+        documents: INITIAL_DOCUMENTS,
+        achievements: INITIAL_ACHIEVEMENTS,
+        majorDecisions: [],
+      }),
     }),
     {
       name: STORAGE_NAME,
