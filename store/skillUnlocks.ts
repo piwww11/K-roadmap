@@ -1,15 +1,15 @@
 import type { Phase, Skill, Task } from '../types';
 
-// Explicit Task → Skill gates for the roadmap progression system.
-// Keep this mapping separate from Speed data.ts so roadmap data stays stable.
+// Explicit Task → Skill gates for roadmap progression.
+// There is intentionally no positional skill-chain fallback.
 
 export const TASK_SKILL_UNLOCKS: Record<string, string[]> = {
   // Physics / Mathematics
   't1-8': ['skill-algebra'],
   't1-9': ['skill-functions'],
-  't2-1': ['skill-mechanics'],
-  't2-2': ['skill-vectors'],
-  't2-3': ['skill-python'],
+  't2-1': ['skill-vectors'],
+  't2-2': ['skill-python'],
+  't2-3': ['skill-mechanics'],
   't2-4': ['skill-waves'],
   't3-1': ['skill-algebra'],
   't3-2': ['skill-functions'],
@@ -38,8 +38,11 @@ function allTasks(phases: Phase[]): Task[] {
   );
 }
 
-/** Repairs already-persisted skill state without resetting user progress. */
-export function repairPersistedSkillUnlocks(phases: Phase[], skills: Skill[]): Skill[] {
+/** Repairs persisted skill state using explicit task gates only. */
+export function repairPersistedSkillUnlocks(
+  phases: Phase[],
+  skills: Skill[]
+): Skill[] {
   const completedTaskIds = new Set(
     allTasks(phases)
       .filter((task) => task.status === 'Completed')
@@ -50,7 +53,8 @@ export function repairPersistedSkillUnlocks(phases: Phase[], skills: Skill[]): S
     if (skill.status !== 'locked') return skill;
 
     const unlockedByTask = Object.entries(TASK_SKILL_UNLOCKS).some(
-      ([taskId, skillIds]) => completedTaskIds.has(taskId) && skillIds.includes(skill.id)
+      ([taskId, skillIds]) =>
+        completedTaskIds.has(taskId) && skillIds.includes(skill.id)
     );
 
     if (!unlockedByTask) return skill;
