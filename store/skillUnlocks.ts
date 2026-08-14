@@ -1,3 +1,5 @@
+import type { Phase, Skill, Task } from '../types';
+
 // Explicit Task → Skill gates for the roadmap progression system.
 // Keep this mapping separate from Speed data.ts so roadmap data stays stable.
 
@@ -29,3 +31,34 @@ export const TASK_SKILL_UNLOCKS: Record<string, string[]> = {
   't3-8': ['skill-genetics-life'],
   't3-9': ['skill-bioinformatics'],
 };
+
+function allTasks(phases: Phase[]): Task[] {
+  return phases.flatMap((phase) =>
+    phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks))
+  );
+}
+
+/** Repairs already-persisted skill state without resetting user progress. */
+export function repairPersistedSkillUnlocks(phases: Phase[], skills: Skill[]): Skill[] {
+  const completedTaskIds = new Set(
+    allTasks(phases)
+      .filter((task) => task.status === 'Completed')
+      .map((task) => task.id)
+  );
+
+  return skills.map((skill) => {
+    if (skill.status !== 'locked') return skill;
+
+    const unlockedByTask = Object.entries(TASK_SKILL_UNLOCKS).some(
+      ([taskId, skillIds]) => completedTaskIds.has(taskId) && skillIds.includes(skill.id)
+    );
+
+    if (!unlockedByTask) return skill;
+
+    return {
+      ...skill,
+      status: 'not-started',
+      unlockedAt: skill.unlockedAt ?? new Date().toISOString(),
+    };
+  });
+}
