@@ -27,7 +27,7 @@ import {
 } from './Speed data';
 import { TASK_SKILL_UNLOCKS } from './skillUnlocks';
 
-const STORAGE_VERSION = 3;
+const STORAGE_VERSION = 4;
 const STORAGE_NAME = 'k-roadmap-storage-v2';
 
 const clampScore = (value: number) => Math.min(10, Math.max(0, value));
@@ -143,29 +143,36 @@ function canUnlockSkill(skill: Skill, phases: Phase[], skills: Skill[]): boolean
 function recalculateSkills(
   phases: Phase[],
   skills: Skill[],
-  completedTaskId?: string
+  _completedTaskId?: string
 ): Skill[] {
   let nextSkills = skills.map((skill) => ({ ...skill }));
+  const tasks = allTasks(phases);
+  const completedTaskIds = new Set(
+    tasks.filter((task) => task.status === 'Completed').map((task) => task.id)
+  );
 
+  // Explicit task gates are evaluated from the complete task state, not only
+  // from the task changed in the current click. This also repairs persisted
+  // states where the task was completed before the mapping was introduced.
   nextSkills = nextSkills.map((skill) => {
-    if (skill.status !== 'locked' || !canUnlockSkill(skill, phases, nextSkills)) {
-      return skill;
-    }
+    if (skill.status !== 'locked') return skill;
+    if (!canUnlockSkill(skill, phases, nextSkills)) return skill;
+
+    const mappedTaskIds = Object.entries(TASK_SKILL_UNLOCKS)
+      .filter(([, skillIds]) => skillIds.includes(skill.id))
+      .map(([taskId]) => taskId);
+
+    const mappingTriggered = mappedTaskIds.some((taskId) => completedTaskIds.has(taskId));
+    const taskTriggeredByInlineMetadata = tasks.some(
+      (task) =>
+        task.status === 'Completed' &&
+        task.unlocksSkillIds?.includes(skill.id)
+    );
 
     const hasExplicitRequirement =
       Boolean(skill.requiredTaskIds?.length) || Boolean(skill.requiredSkillIds?.length);
 
-    const taskTriggered =
-      completedTaskId !== undefined &&
-      (TASK_SKILL_UNLOCKS[completedTaskId]?.includes(skill.id) === true ||
-        allTasks(phases).some(
-          (task) =>
-            task.id === completedTaskId &&
-            task.status === 'Completed' &&
-            task.unlocksSkillIds?.includes(skill.id)
-        ));
-
-    if (hasExplicitRequirement || taskTriggered) {
+    if (mappingTriggered || taskTriggeredByInlineMetadata || hasExplicitRequirement) {
       return {
         ...skill,
         status: 'not-started' as SkillStatus,
@@ -176,6 +183,8 @@ function recalculateSkills(
     return skill;
   });
 
+  // Preserve the existing skill-chain behavior inside the SAME track and
+  // category. This never crosses Physics/BCS/Life Science boundaries.
   for (let index = 0; index < nextSkills.length; index += 1) {
     const current = nextSkills[index];
     if (current.status !== 'completed') continue;
