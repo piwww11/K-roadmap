@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useJourneyStore } from '@/store/useJourneyStore';
+import type { Major } from '@/types';
 
 import {
   DndContext,

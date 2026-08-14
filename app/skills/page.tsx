@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useJourneyStore } from '@/store/useJourneyStore';
+import type { Skill, SkillStatus, MajorTrack } from '@/types';
 import {
   Lock,
   Check,

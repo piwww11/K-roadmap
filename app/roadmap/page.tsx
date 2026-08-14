@@ -3,6 +3,7 @@
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { CheckCircle2, Circle, Calendar, Flag, Map } from 'lucide-react';
 import { motion } from 'framer-motion';
+import type { Phase, Month, Goal, Task } from '@/types';
 
 export default function RoadmapPage() {
   const { phases, toggleTask } = useJourneyStore();

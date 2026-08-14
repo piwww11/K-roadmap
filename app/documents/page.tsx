@@ -12,8 +12,7 @@ import {
 } from 'lucide-react';
 
 import { useJourneyStore } from '../../store/useJourneyStore';
-import type { DocumentStatus } from '../../types';
-
+import type { DocumentItem, DocumentStatus } from '@/types';
 const statusOrder: DocumentStatus[] = [
   'Not Started',
   'In Progress',

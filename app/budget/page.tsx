@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 
 import { useJourneyStore } from '../../store/useJourneyStore';
-import type { BudgetItem } from '../../types';
+import type { BudgetItem, BudgetCategory } from '@/types';
 
 const categories = [
   'Application',

@@ -1,20 +1,13 @@
+// ============ ENUMS & TYPES ============
+
 export type TaskStatus = 'Not Started' | 'In Progress' | 'Completed';
+export type SkillStatus = 'not-started' | 'learning' | 'completed' | 'locked';
+export type DocumentStatus = 'Not Started' | 'In Progress' | 'Ready' | 'Verified';
+export type BudgetCategory = 'Application' | 'Document' | 'Travel' | 'Other' | 'Language Test' | 'Translation' | 'Authentication' | 'Transportation';
+export type JournalCategory = 'Physics' | 'BCS' | 'Life Science' | 'GKS' | 'Mathematics' | 'Personal' | 'University Research';
+export type MajorTrack = 'physics' | 'bcs' | 'life-science';
 
-export interface Task {
-  id: string;
-  title: string;
-  phaseId: string;
-  status: TaskStatus;
-  category: 'Math' | 'Physics' | 'BCS' | 'Life Science' | 'Language' | 'GKS';
-}
-
-export interface Phase {
-  id: string;
-  title: string;
-  timeline: string;
-  description: string;
-  tasks: Task[];
-}
+// ============ MAJOR ============
 
 export interface Major {
   id: string;
@@ -23,40 +16,207 @@ export interface Major {
   interestScore: number;
   confidenceScore: number;
   themeColor: string;
+  icon: string;
+  description?: string;
 }
 
-// Skill Tree
-export type SkillStatus =
-  'locked' |
-  'not-started' |
-  'learning' |
-  'completed';
+// ============ TASK & GOAL & MONTH & PHASE ============
+
+export interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  goalId: string;
+  status: TaskStatus;
+  category: string;
+  majorReward?: {
+    majorId: string;
+    confidenceAmount: number;
+  };
+  dueDate?: string;
+  createdAt: string;
+}
+
+export interface Goal {
+  id: string;
+  title: string;
+  description?: string;
+  monthId: string;
+  tasks: Task[];
+  status: TaskStatus;
+  progress: number;
+  category?: string;
+}
+
+export interface Month {
+  id: string;
+  name: string;
+  year: number;
+  phaseId: string;
+  goals: Goal[];
+  startDate: string;
+  endDate: string;
+}
+
+export interface Phase {
+  id: string;
+  number: number;
+  title: string;
+  subtitle: string;
+  description: string;
+  months: Month[];
+  startDate: string;
+  endDate: string;
+  status: 'Not Started' | 'In Progress' | 'Completed';
+}
+
+// ============ SKILL & SKILL TREE ============
 
 export interface Skill {
   id: string;
   title: string;
-  track: 'physics' | 'bcs' | 'life-science';
+  track: MajorTrack;
   category: string;
   status: SkillStatus;
+  unlockedAt?: string;
+  completedAt?: string;
 }
-// Documents & Budget
 
-export type DocumentStatus =
-  | 'Not Started'
-  | 'In Progress'
-  | 'Completed';
+// ============ JOURNAL ============
+
+export interface JournalEntry {
+  id: string;
+  date: string;
+  title: string;
+  content: string;
+  category: JournalCategory;
+  mood: number;
+  interest: number;
+  tags: string[];
+  createdAt: string;
+}
+
+// ============ BUDGET ============
+
+export interface BudgetItem {
+  id: string;
+  name: string;
+  amount: number;
+  category: BudgetCategory;
+  dueDate?: string;
+  notes?: string;
+}
+
+export interface Budget {
+  items: BudgetItem[];
+  targetAmount: number;
+  currentSavings: number;
+}
+
+// ============ DOCUMENT ============
 
 export interface DocumentItem {
   id: string;
   name: string;
   description: string;
   status: DocumentStatus;
-  category: 'GKS' | 'University' | 'Personal';
+  category: string;
+  dueDate?: string;
+  notes?: string;
+  reference?: string;
 }
 
-export interface BudgetItem {
+// ============ ACHIEVEMENT ============
+
+export interface Achievement {
   id: string;
   name: string;
-  amount: number;
-  category: 'Application' | 'Document' | 'Travel' | 'Other';
+  description: string;
+  icon: string;
+  unlockedAt?: string;
+  rarity: 'common' | 'rare' | 'epic' | 'legendary';
+}
+
+// ============ MAJOR DECISION EVAL ============
+
+export interface MajorDecisionResponse {
+  q1_most_curious: string;
+  q2_willing_to_struggle: string;
+  q3_enjoy_most: string;
+  q4_math_feeling: string;
+  q5_most_enjoyable_experiment: string;
+  q6_voluntary_research: string;
+  q7_without_name: string;
+  timestamp: string;
+}
+
+// ============ JOURNEY STATE ============
+
+export interface JourneyState {
+  // Meta
+  myWhy: string;
+  setMyWhy: (text: string) => void;
+
+  // Roadmap
+  phases: Phase[];
+  getPhase: (phaseId: string) => Phase | undefined;
+  getMonth: (monthId: string) => Month | undefined;
+  getGoal: (goalId: string) => Goal | undefined;
+  getTask: (taskId: string) => Task | undefined;
+  toggleTask: (taskId: string) => void;
+  addTask: (goalId: string, task: Omit<Task, 'id' | 'goalId' | 'createdAt'>) => void;
+  updateTask: (taskId: string, updates: Partial<Task>) => void;
+  deleteTask: (taskId: string) => void;
+
+  // Majors
+  majors: Major[];
+  reorderMajors: (oldIndex: number, newIndex: number) => void;
+  updateMajorScore: (majorId: string, type: 'interest' | 'confidence', score: number) => void;
+  getMajorConfidenceFromTasks: (majorId: string) => number;
+
+  // Skills
+  skills: Skill[];
+  updateSkillStatus: (skillId: string, status: SkillStatus) => void;
+
+  // Journal
+  journalEntries: JournalEntry[];
+  addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'createdAt'>) => void;
+  updateJournalEntry: (entryId: string, updates: Partial<JournalEntry>) => void;
+  deleteJournalEntry: (entryId: string) => void;
+  getJournalByCategory: (category: JournalCategory) => JournalEntry[];
+
+  // Budget
+  budget: Budget;
+  addBudgetItem: (item: BudgetItem) => void;
+  removeBudgetItem: (itemId: string) => void;
+  updateBudgetItem: (itemId: string, updates: Partial<BudgetItem>) => void;
+  setBudgetTarget: (amount: number) => void;
+  setCurrentSavings: (amount: number) => void;
+
+  // Documents
+  documents: DocumentItem[];
+  updateDocumentStatus: (documentId: string, status: DocumentStatus) => void;
+  addDocument: (doc: Omit<DocumentItem, 'id'>) => void;
+  deleteDocument: (documentId: string) => void;
+
+  // Achievements
+  achievements: Achievement[];
+  unlockAchievement: (achievementId: string) => void;
+
+  // Major Decision
+  majorDecisions: MajorDecisionResponse[];
+  addMajorDecisionResponse: (response: MajorDecisionResponse) => void;
+
+  // Progress & Stats
+  getOverallProgress: () => number;
+  getPhaseProgress: (phaseId: string) => number;
+  getCompletedTaskCount: () => number;
+  getTotalTaskCount: () => number;
+  getCurrentPhase: () => Phase | undefined;
+  getNextTask: () => Task | undefined;
+
+  // Data Management
+  exportData: () => string;
+  importData: (jsonString: string) => boolean;
+  resetData: () => void;
 }

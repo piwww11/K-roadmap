@@ -1,248 +1,278 @@
 'use client';
 
+import { useState } from 'react';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import {
-  CheckCircle2,
-  Target,
-  Zap,
-  FileText,
-  Wallet,
+  Lock,
+  Check,
+  Play,
+  Circle,
+  Brain,
+  Atom,
+  Dna,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import type { SkillStatus } from '@/types';
 
-export default function Dashboard() {
-  const {
-    phases,
-    myWhy,
-    toggleTask,
-    documents,
-    budget,
-  } = useJourneyStore();
+const trackInfo = {
+  physics: {
+    name: 'Physics Track',
+    icon: Atom,
+    color: 'text-indigo-400',
+    bg: 'bg-indigo-500',
+  },
+  bcs: {
+    name: 'BCS Track',
+    icon: Brain,
+    color: 'text-cyan-400',
+    bg: 'bg-cyan-500',
+  },
+  'life-science': {
+    name: 'Life Science',
+    icon: Dna,
+    color: 'text-emerald-400',
+    bg: 'bg-emerald-500',
+  },
+};
 
-  // ======================================================
-  // ROADMAP PROGRESS
-  // ======================================================
-
-  const allTasks = phases.flatMap((p) => p.tasks);
-
-  const completedTasks = allTasks.filter(
-    (task) => task.status === 'Completed'
+export default function SkillTreePage() {
+  const skills = useJourneyStore((state) => state.skills);
+  const updateSkillStatus = useJourneyStore(
+    (state) => state.updateSkillStatus
   );
 
-  const progressPercent =
-    Math.round(
-      (completedTasks.length / allTasks.length) * 100
-    ) || 0;
-
-  // First incomplete task = Today's Mission
-  const todaysMission = allTasks.find(
-    (task) => task.status !== 'Completed'
+  const [activeTrack, setActiveTrack] =
+  useState<'physics' | 'bcs' | 'life-science'>('physics');
+  const currentSkills = skills.filter(
+    (skill) => skill.track === activeTrack
   );
 
-  // ======================================================
-  // DOCUMENT PROGRESS
-  // ======================================================
+  const categories = [
+    ...new Set(currentSkills.map((skill) => skill.category)),
+  ];
 
-  const completedDocuments = documents.filter(
-    (document) => document.status === 'Completed'
-  );
+  const handleSkillClick = (
+    skillId: string,
+    status: SkillStatus
+  ) => {
+    if (status === 'locked') return;
 
-  const documentProgress =
-    Math.round(
-      (completedDocuments.length / documents.length) * 100
-    ) || 0;
+    let nextStatus: SkillStatus;
 
-  // ======================================================
-  // BUDGET
-  // ======================================================
+    if (status === 'not-started') {
+      nextStatus = 'learning';
+    } else if (status === 'learning') {
+      nextStatus = 'completed';
+    } else {
+      nextStatus = 'not-started';
+    }
 
-  const totalBudget = budget.reduce(
-    (total, item) => total + item.amount,
-    0
-  );
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      maximumFractionDigits: 0,
-    }).format(amount);
+    updateSkillStatus(skillId, nextStatus);
   };
 
+  const TrackIcon = trackInfo[activeTrack].icon;
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans">
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-8">
+      <div className="max-w-5xl mx-auto">
 
-      {/* ==================================================
-          HEADER
-      ================================================== */}
-
-      <header className="mb-12">
-        <h1 className="text-4xl font-bold tracking-tight text-white mb-2">
-          🇰🇷 K-ROADMAP
-        </h1>
-
-        <p className="text-slate-400 text-lg">
-          My Journey to Korea 2027
-        </p>
-      </header>
-
-      {/* ==================================================
-          MAIN STATS
-      ================================================== */}
-
-      <div className="grid grid-cols-1 gap-6 mb-12 md:grid-cols-3">
-
-        {/* OVERALL PROGRESS */}
-
-        <div className="group flex flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:border-indigo-500/20 hover:shadow-[0_8px_30px_rgba(15,23,42,0.5)]">
-
-          <div>
-            <h2 className="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-1">
-              Overall Progress
-            </h2>
-
-            <div className="text-3xl font-bold text-white mb-4">
-              {progressPercent}%
-            </div>
-          </div>
-
-          <div className="w-full bg-slate-800 rounded-full h-2.5">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${progressPercent}%` }}
-              className="h-2.5 rounded-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-700"
-            />
-          </div>
-
-          <p className="text-xs text-slate-500 mt-3">
-            {completedTasks.length} of {allTasks.length} tasks completed
+        {/* Header */}
+        <header className="mb-10">
+          <p className="text-indigo-400 text-sm font-semibold uppercase tracking-widest mb-2">
+            K-ROADMAP
           </p>
-        </div>
 
-        {/* DOCUMENT PROGRESS */}
+          <h1 className="text-4xl font-bold text-white">
+            Skill Progression Tree
+          </h1>
 
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-lg">
-
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-1">
-                Application Readiness
-              </h2>
-
-              <div className="text-3xl font-bold text-white">
-                {documentProgress}%
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-cyan-500/10 text-cyan-400">
-              <FileText size={24} />
-            </div>
-          </div>
-
-          <div className="w-full bg-slate-800 rounded-full h-2.5">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${documentProgress}%` }}
-              className="bg-cyan-500 h-2.5 rounded-full"
-            />
-          </div>
-
-          <p className="text-xs text-slate-500 mt-3">
-            {completedDocuments.length} of {documents.length} documents completed
+          <p className="text-slate-400 mt-2">
+            Build your foundations one skill at a time.
           </p>
-        </div>
+        </header>
 
-        {/* BUDGET */}
+        {/* Track Selector */}
+        <div className="flex flex-wrap gap-3 mb-12">
+          {(
+            Object.keys(trackInfo) as Array<
+              'physics' | 'bcs' | 'life-science'
+            >
+          ).map((track) => {
+            const Icon = trackInfo[track].icon;
+            const isActive = activeTrack === track;
 
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-lg">
-
-          <div className="flex items-center justify-between">
-
-            <div>
-              <h2 className="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">
-                Budget Tracked
-              </h2>
-
-              <div className="text-2xl font-bold text-white">
-                {formatCurrency(totalBudget)}
-              </div>
-
-              <p className="text-xs text-slate-500 mt-2">
-                {budget.length} budget items
-              </p>
-            </div>
-
-            <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400">
-              <Wallet size={24} />
-            </div>
-
-          </div>
-        </div>
-      </div>
-
-      {/* ==================================================
-          TODAY'S MISSION
-      ================================================== */}
-
-      <div className="mb-8">
-
-        <div className="bg-gradient-to-br from-indigo-900/40 to-slate-900 border border-indigo-500/30 p-6 rounded-2xl shadow-lg relative overflow-hidden">
-
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <Target size={120} />
-          </div>
-
-          <h2 className="flex items-center gap-2 text-indigo-400 text-sm font-semibold uppercase tracking-wider mb-4">
-            <Zap size={16} />
-            Today's Mission
-          </h2>
-
-          {todaysMission ? (
-            <div>
-
-              <h3 className="text-2xl font-bold text-white mb-6 max-w-lg">
-                {todaysMission.title}
-              </h3>
-
+            return (
               <button
-                onClick={() =>
-                  toggleTask(
-                    todaysMission.phaseId,
-                    todaysMission.id
-                  )
-                }
-                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 font-medium text-white shadow-lg shadow-indigo-950/40 transition-all duration-200 hover:-translate-y-0.5 hover:bg-indigo-500 hover:shadow-indigo-900/50 active:translate-y-0"
+                key={track}
+                onClick={() => setActiveTrack(track)}
+                className={`flex items-center gap-2 px-5 py-3 rounded-xl border transition-all ${
+                  isActive
+                    ? 'bg-slate-800 border-slate-700 text-white'
+                    : 'bg-slate-900 border-transparent text-slate-400 hover:bg-slate-800'
+                }`}
               >
-                <CheckCircle2 size={20} />
-                Complete Mission
+                <Icon
+                  size={20}
+                  className={
+                    isActive
+                      ? trackInfo[track].color
+                      : 'text-slate-500'
+                  }
+                />
+
+                {trackInfo[track].name}
               </button>
-
-            </div>
-          ) : (
-            <h3 className="text-2xl font-bold text-emerald-400 mb-6">
-              All caught up! Excellent work.
-            </h3>
-          )}
-
+            );
+          })}
         </div>
+
+        {/* Skill Categories */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+          {categories.map((category) => {
+            const categorySkills = currentSkills.filter(
+              (skill) => skill.category === category
+            );
+
+            return (
+              <section key={category}>
+                <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400 mb-6 border-b border-slate-800 pb-3">
+                  {category}
+                </h2>
+
+                <div className="flex flex-col items-center">
+                  {categorySkills.map((skill, index) => {
+                    const isLast =
+                      index === categorySkills.length - 1;
+
+                    const isLocked =
+                      skill.status === 'locked';
+
+                    const isLearning =
+                      skill.status === 'learning';
+
+                    const isCompleted =
+                      skill.status === 'completed';
+
+                    return (
+                      <div
+                        key={skill.id}
+                        className="flex flex-col items-center w-full"
+                      >
+
+                        {/* Skill Node */}
+                        <motion.button
+                          whileHover={
+                            isLocked ? {} : { scale: 1.04 }
+                          }
+                          whileTap={
+                            isLocked ? {} : { scale: 0.97 }
+                          }
+                          disabled={isLocked}
+                          onClick={() =>
+                            handleSkillClick(
+                              skill.id,
+                              skill.status
+                            )
+                          }
+                          className={`w-full max-w-xs px-4 py-4 rounded-xl border-2 transition-all ${
+                            isLocked
+                              ? 'bg-slate-950 border-slate-800 opacity-50 cursor-not-allowed'
+                              : isCompleted
+                              ? `${trackInfo[activeTrack].bg} border-transparent`
+                              : isLearning
+                              ? `bg-slate-900 border-dashed ${trackInfo[activeTrack].color.replace(
+                                  'text-',
+                                  'border-'
+                                )}`
+                              : 'bg-slate-900 border-slate-700 hover:border-slate-500'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+
+                            {/* Status Icon */}
+                            <div className="w-7 h-7 rounded-full bg-slate-950 flex items-center justify-center shrink-0">
+                              {skill.status === 'locked' && (
+                                <Lock
+                                  size={15}
+                                  className="text-slate-600"
+                                />
+                              )}
+
+                              {skill.status === 'not-started' && (
+                                <Circle
+                                  size={15}
+                                  className="text-slate-400"
+                                />
+                              )}
+
+                              {skill.status === 'learning' && (
+                                <Play
+                                  size={15}
+                                  className={
+                                    trackInfo[activeTrack].color
+                                  }
+                                  fill="currentColor"
+                                />
+                              )}
+
+                              {skill.status === 'completed' && (
+                                <Check
+                                  size={16}
+                                  className="text-white"
+                                  strokeWidth={3}
+                                />
+                              )}
+                            </div>
+
+                            {/* Title */}
+                            <span
+                              className={`font-semibold text-sm ${
+                                isLocked
+                                  ? 'text-slate-600'
+                                  : 'text-white'
+                              }`}
+                            >
+                              {skill.title}
+                            </span>
+                          </div>
+                        </motion.button>
+
+                        {/* Connecting Line */}
+                        {!isLast && (
+                          <div className="w-1 h-8 bg-slate-800 relative overflow-hidden">
+                            <div
+                              className={`absolute inset-0 ${
+                                isCompleted
+                                  ? trackInfo[activeTrack].bg
+                                  : 'bg-transparent'
+                              }`}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+
+        {/* Info */}
+        <div className="mt-12 bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <p className="text-sm text-slate-400">
+            <span className="text-white font-semibold">
+              How it works:
+            </span>{' '}
+            Click a skill to cycle through{' '}
+            <span className="text-slate-300">
+              Not Started → Learning → Completed
+            </span>
+            . Your progress is automatically saved.
+          </p>
+        </div>
+
       </div>
-
-      {/* ==================================================
-          MY WHY
-      ================================================== */}
-
-      <div className="max-w-3xl rounded-2xl border border-slate-800 bg-slate-900 p-8 shadow-lg transition-all duration-300 hover:border-slate-700">
-
-        <h2 className="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-4">
-          Why I'm Doing This
-        </h2>
-
-        <p className="border-l-4 border-indigo-500/40 pl-4 text-lg italic leading-relaxed text-slate-300">
-          "{myWhy}"
-        </p>
-
-      </div>
-
-    </div>
+    </main>
   );
 }
