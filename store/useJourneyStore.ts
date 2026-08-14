@@ -7,14 +7,10 @@ import type {
   Task,
   Major,
   Skill,
-  JournalEntry,
   BudgetItem,
-  DocumentItem,
-  Achievement,
   MajorDecisionResponse,
   TaskStatus,
   SkillStatus,
-  DocumentStatus,
   JournalCategory,
 } from '../types';
 import {
@@ -27,7 +23,7 @@ import {
 } from './Speed data';
 import { TASK_SKILL_UNLOCKS } from './skillUnlocks';
 
-const STORAGE_VERSION = 4;
+const STORAGE_VERSION = 5;
 const STORAGE_NAME = 'k-roadmap-storage-v2';
 
 const clampScore = (value: number) => Math.min(10, Math.max(0, value));
@@ -68,7 +64,6 @@ function calculatePhaseState(phase: Phase): Phase {
     ...month,
     goals: month.goals.map(calculateGoalState),
   }));
-
   const tasks = months.flatMap((month) =>
     month.goals.flatMap((goal) => goal.tasks)
   );
@@ -97,23 +92,21 @@ function recalculatePhases(phases: Phase[]): Phase[] {
 
 function taskRewardsByMajor(phases: Phase[]): Map<string, number> {
   const rewards = new Map<string, number>();
-
   for (const task of allTasks(phases)) {
     if (task.status !== 'Completed' || !task.majorReward) continue;
-    const current = rewards.get(task.majorReward.majorId) ?? 0;
-    rewards.set(task.majorReward.majorId, current + task.majorReward.confidenceAmount);
+    rewards.set(
+      task.majorReward.majorId,
+      (rewards.get(task.majorReward.majorId) ?? 0) + task.majorReward.confidenceAmount
+    );
   }
-
   return rewards;
 }
 
 function recalculateMajors(phases: Phase[], majors: Major[]): Major[] {
   const rewards = taskRewardsByMajor(phases);
-
   return majors.map((major) => {
     const base = major.baseConfidenceScore ?? major.confidenceScore;
     const reward = rewards.get(major.id) ?? 0;
-
     return {
       ...major,
       baseConfidenceScore: base,
@@ -122,57 +115,65 @@ function recalculateMajors(phases: Phase[], majors: Major[]): Major[] {
   });
 }
 
-function canUnlockSkill(skill: Skill, phases: Phase[], skills: Skill[]): boolean {
-  const taskReady =
-    !skill.requiredTaskIds ||
-    skill.requiredTaskIds.length === 0 ||
-    skill.requiredTaskIds.every(
-      (id) => getTaskFromPhases(phases, id)?.status === 'Completed'
-    );
-
-  const skillReady =
-    !skill.requiredSkillIds ||
-    skill.requiredSkillIds.length === 0 ||
-    skill.requiredSkillIds.every(
-      (id) => skills.find((candidate) => candidate.id === id)?.status === 'completed'
-    );
-
-  return taskReady && skillReady;
-}
-
-function recalculateSkills(
-  phases: Phase[],
-  skills: Skill[],
-  _completedTaskId?: string
-): Skill[] {
-  let nextSkills = skills.map((skill) => ({ ...skill }));
+/**
+ * Skill progression has ONE source of truth:
+ * completed roadmap tasks + explicit task/skill requirements.
+ * There is intentionally NO positional/track/category skill chain.
+ */
+function recalculateSkills(phases: Phase[], skills: Skill[]): Skill[] {
   const tasks = allTasks(phases);
   const completedTaskIds = new Set(
     tasks.filter((task) => task.status === 'Completed').map((task) => task.id)
   );
+  const completedSkillIds = new Set(
+    skills.filter((skill) => skill.status === 'completed').map((skill) => skill.id)
+  );
 
-  // Explicit task gates are evaluated from the complete task state, not only
-  // from the task changed in the current click. This also repairs persisted
-  // states where the task was completed before the mapping was introduced.
-  nextSkills = nextSkills.map((skill) => {
-    if (skill.status !== 'locked') return skill;
-    if (!canUnlockSkill(skill, phases, nextSkills)) return skill;
+  return skills.map((skill) => {
+    // Never revoke a skill the user has already completed. Unlock gates control
+    // access to a skill; they should not erase historical completion.
+    if (skill.status === 'completed') return skill;
 
     const mappedTaskIds = Object.entries(TASK_SKILL_UNLOCKS)
       .filter(([, skillIds]) => skillIds.includes(skill.id))
       .map(([taskId]) => taskId);
 
-    const mappingTriggered = mappedTaskIds.some((taskId) => completedTaskIds.has(taskId));
-    const taskTriggeredByInlineMetadata = tasks.some(
-      (task) =>
-        task.status === 'Completed' &&
-        task.unlocksSkillIds?.includes(skill.id)
+    const inlineTaskIds = tasks
+      .filter(
+        (task) =>
+          task.status === 'Completed' &&
+          task.unlocksSkillIds?.includes(skill.id)
+      )
+      .map((task) => task.id);
+
+    const requiredTaskIds = skill.requiredTaskIds ?? [];
+    const requiredSkillIds = skill.requiredSkillIds ?? [];
+
+    const mappedTaskReady = mappedTaskIds.some((taskId) =>
+      completedTaskIds.has(taskId)
     );
+    const inlineTaskReady = inlineTaskIds.length > 0;
+    const requiredTasksReady =
+      requiredTaskIds.length === 0 ||
+      requiredTaskIds.every((taskId) => completedTaskIds.has(taskId));
+    const requiredSkillsReady =
+      requiredSkillIds.length === 0 ||
+      requiredSkillIds.every((skillId) => completedSkillIds.has(skillId));
 
-    const hasExplicitRequirement =
-      Boolean(skill.requiredTaskIds?.length) || Boolean(skill.requiredSkillIds?.length);
+    const hasExplicitGate =
+      mappedTaskIds.length > 0 ||
+      inlineTaskIds.length > 0 ||
+      requiredTaskIds.length > 0 ||
+      requiredSkillIds.length > 0;
 
-    if (mappingTriggered || taskTriggeredByInlineMetadata || hasExplicitRequirement) {
+    if (!hasExplicitGate) return skill;
+
+    const unlocked =
+      (mappedTaskReady || inlineTaskReady || requiredTaskIds.length > 0 || requiredSkillIds.length > 0) &&
+      requiredTasksReady &&
+      requiredSkillsReady;
+
+    if (unlocked && skill.status === 'locked') {
       return {
         ...skill,
         status: 'not-started' as SkillStatus,
@@ -180,35 +181,16 @@ function recalculateSkills(
       };
     }
 
-    return skill;
-  });
-
-  // Preserve the existing skill-chain behavior inside the SAME track and
-  // category. This never crosses Physics/BCS/Life Science boundaries.
-  for (let index = 0; index < nextSkills.length; index += 1) {
-    const current = nextSkills[index];
-    if (current.status !== 'completed') continue;
-
-    const nextIndex = nextSkills.findIndex(
-      (candidate, candidateIndex) =>
-        candidateIndex > index &&
-        candidate.status === 'locked' &&
-        !candidate.requiredTaskIds?.length &&
-        !candidate.requiredSkillIds?.length &&
-        candidate.track === current.track &&
-        candidate.category === current.category
-    );
-
-    if (nextIndex !== -1) {
-      nextSkills[nextIndex] = {
-        ...nextSkills[nextIndex],
-        status: 'not-started',
-        unlockedAt: nextSkills[nextIndex].unlockedAt ?? new Date().toISOString(),
+    if (!unlocked && skill.status === 'not-started') {
+      return {
+        ...skill,
+        status: 'locked',
+        unlockedAt: undefined,
       };
     }
-  }
 
-  return nextSkills;
+    return skill;
+  });
 }
 
 function migratePersistedState(persisted: unknown): unknown {
@@ -223,14 +205,12 @@ function migratePersistedState(persisted: unknown): unknown {
   const phases = Array.isArray(state.phases) ? state.phases : INITIAL_PHASES;
   const majors = Array.isArray(state.majors) ? state.majors : INITIAL_MAJORS;
   const rewards = taskRewardsByMajor(phases);
-
   const migratedMajors = majors.map((major: Major) => ({
     ...major,
     baseConfidenceScore:
       major.baseConfidenceScore ??
       clampScore(major.confidenceScore - (rewards.get(major.id) ?? 0)),
   }));
-
   const normalizedPhases = recalculatePhases(phases);
   const migratedSkills = Array.isArray(state.skills) ? state.skills : INITIAL_SKILLS;
 
@@ -241,9 +221,13 @@ function migratePersistedState(persisted: unknown): unknown {
     skills: recalculateSkills(normalizedPhases, migratedSkills),
     journalEntries: Array.isArray(state.journalEntries) ? state.journalEntries : [],
     budget:
-      state.budget && Array.isArray(state.budget.items) ? state.budget : INITIAL_BUDGET,
+      state.budget && Array.isArray(state.budget.items)
+        ? state.budget
+        : INITIAL_BUDGET,
     documents: Array.isArray(state.documents) ? state.documents : INITIAL_DOCUMENTS,
-    achievements: Array.isArray(state.achievements) ? state.achievements : INITIAL_ACHIEVEMENTS,
+    achievements: Array.isArray(state.achievements)
+      ? state.achievements
+      : INITIAL_ACHIEVEMENTS,
     majorDecisions: Array.isArray(state.majorDecisions) ? state.majorDecisions : [],
   };
 }
@@ -279,7 +263,9 @@ export const useJourneyStore = create<JourneyState>()(
         set((state) => {
           const currentTask = getTaskFromPhases(state.phases, taskId);
           if (!currentTask) return state;
-          const nextStatus: TaskStatus = currentTask.status === 'Completed' ? 'Not Started' : 'Completed';
+          const nextStatus: TaskStatus =
+            currentTask.status === 'Completed' ? 'Not Started' : 'Completed';
+
           const phases = recalculatePhases(
             state.phases.map((phase) => ({
               ...phase,
@@ -287,31 +273,47 @@ export const useJourneyStore = create<JourneyState>()(
                 ...month,
                 goals: month.goals.map((goal) => ({
                   ...goal,
-                  tasks: goal.tasks.map((task) => task.id === taskId ? { ...task, status: nextStatus } : task),
+                  tasks: goal.tasks.map((task) =>
+                    task.id === taskId ? { ...task, status: nextStatus } : task
+                  ),
                 })),
+              })),
+            }))
+          );
+
+          return {
+            phases,
+            majors: recalculateMajors(phases, state.majors),
+            skills: recalculateSkills(phases, state.skills),
+          };
+        }),
+
+      addTask: (goalId, task) =>
+        set((state) => {
+          const newTask: Task = {
+            ...task,
+            id: `task-${Date.now()}`,
+            goalId,
+            createdAt: new Date().toISOString(),
+          };
+          const phases = recalculatePhases(
+            state.phases.map((phase) => ({
+              ...phase,
+              months: phase.months.map((month) => ({
+                ...month,
+                goals: month.goals.map((goal) =>
+                  goal.id === goalId
+                    ? { ...goal, tasks: [...goal.tasks, newTask] }
+                    : goal
+                ),
               })),
             }))
           );
           return {
             phases,
             majors: recalculateMajors(phases, state.majors),
-            skills: recalculateSkills(phases, state.skills, nextStatus === 'Completed' ? taskId : undefined),
+            skills: recalculateSkills(phases, state.skills),
           };
-        }),
-
-      addTask: (goalId, task) =>
-        set((state) => {
-          const newTask: Task = { ...task, id: `task-${Date.now()}`, goalId, createdAt: new Date().toISOString() };
-          const phases = recalculatePhases(
-            state.phases.map((phase) => ({
-              ...phase,
-              months: phase.months.map((month) => ({
-                ...month,
-                goals: month.goals.map((goal) => goal.id === goalId ? { ...goal, tasks: [...goal.tasks, newTask] } : goal),
-              })),
-            }))
-          );
-          return { phases, majors: recalculateMajors(phases, state.majors), skills: recalculateSkills(phases, state.skills) };
         }),
 
       updateTask: (taskId, updates) =>
@@ -323,12 +325,18 @@ export const useJourneyStore = create<JourneyState>()(
                 ...month,
                 goals: month.goals.map((goal) => ({
                   ...goal,
-                  tasks: goal.tasks.map((task) => task.id === taskId ? { ...task, ...updates } : task),
+                  tasks: goal.tasks.map((task) =>
+                    task.id === taskId ? { ...task, ...updates } : task
+                  ),
                 })),
               })),
             }))
           );
-          return { phases, majors: recalculateMajors(phases, state.majors), skills: recalculateSkills(phases, state.skills) };
+          return {
+            phases,
+            majors: recalculateMajors(phases, state.majors),
+            skills: recalculateSkills(phases, state.skills),
+          };
         }),
 
       deleteTask: (taskId) =>
@@ -338,17 +346,33 @@ export const useJourneyStore = create<JourneyState>()(
               ...phase,
               months: phase.months.map((month) => ({
                 ...month,
-                goals: month.goals.map((goal) => ({ ...goal, tasks: goal.tasks.filter((task) => task.id !== taskId) })),
+                goals: month.goals.map((goal) => ({
+                  ...goal,
+                  tasks: goal.tasks.filter((task) => task.id !== taskId),
+                })),
               })),
             }))
           );
-          return { phases, majors: recalculateMajors(phases, state.majors), skills: recalculateSkills(phases, state.skills) };
+          return {
+            phases,
+            majors: recalculateMajors(phases, state.majors),
+            skills: recalculateSkills(phases, state.skills),
+          };
         }),
 
-      majors: INITIAL_MAJORS.map((major) => ({ ...major, baseConfidenceScore: major.baseConfidenceScore ?? major.confidenceScore })),
+      majors: INITIAL_MAJORS.map((major) => ({
+        ...major,
+        baseConfidenceScore: major.baseConfidenceScore ?? major.confidenceScore,
+      })),
       reorderMajors: (oldIndex, newIndex) =>
         set((state) => {
-          if (oldIndex < 0 || oldIndex >= state.majors.length || newIndex < 0 || newIndex >= state.majors.length) return state;
+          if (
+            oldIndex < 0 ||
+            oldIndex >= state.majors.length ||
+            newIndex < 0 ||
+            newIndex >= state.majors.length
+          )
+            return state;
           const majors = [...state.majors];
           const [moved] = majors.splice(oldIndex, 1);
           if (!moved) return state;
@@ -359,11 +383,22 @@ export const useJourneyStore = create<JourneyState>()(
         set((state) => {
           const nextScore = clampScore(score);
           const rewards = taskRewardsByMajor(state.phases);
-          return { majors: state.majors.map((major) => {
-            if (major.id !== majorId) return major;
-            if (type === 'interest') return { ...major, interestScore: nextScore };
-            return { ...major, baseConfidenceScore: nextScore, confidenceScore: Math.round(clampScore(nextScore + (rewards.get(majorId) ?? 0)) * 10) / 10 };
-          }) };
+          return {
+            majors: state.majors.map((major) => {
+              if (major.id !== majorId) return major;
+              if (type === 'interest') {
+                return { ...major, interestScore: nextScore };
+              }
+              return {
+                ...major,
+                baseConfidenceScore: nextScore,
+                confidenceScore:
+                  Math.round(
+                    clampScore(nextScore + (rewards.get(majorId) ?? 0)) * 10
+                  ) / 10,
+              };
+            }),
+          };
         }),
       getMajorConfidenceFromTasks: (majorId) => {
         const reward = taskRewardsByMajor(get().phases).get(majorId) ?? 0;
@@ -375,90 +410,226 @@ export const useJourneyStore = create<JourneyState>()(
       skills: INITIAL_SKILLS,
       updateSkillStatus: (skillId, status) =>
         set((state) => {
+          const skill = state.skills.find((candidate) => candidate.id === skillId);
+          if (!skill || skill.status === 'locked') return state;
+
           const now = new Date().toISOString();
-          let skills = state.skills.map((skill) => skill.id === skillId ? {
-            ...skill,
-            status,
-            unlockedAt: status === 'not-started' && skill.status === 'locked' ? now : skill.unlockedAt,
-            completedAt: status === 'completed' ? now : skill.completedAt,
-          } : skill);
-          skills = recalculateSkills(state.phases, skills);
-          return { skills };
+          const skills = state.skills.map((candidate) =>
+            candidate.id === skillId
+              ? {
+                  ...candidate,
+                  status,
+                  unlockedAt: candidate.unlockedAt ?? now,
+                  completedAt:
+                    status === 'completed' ? now : candidate.completedAt,
+                }
+              : candidate
+          );
+
+          return { skills: recalculateSkills(state.phases, skills) };
         }),
 
       journalEntries: [],
-      addJournalEntry: (entry) => set((state) => ({ journalEntries: [...state.journalEntries, { ...entry, id: `journal-${Date.now()}`, createdAt: new Date().toISOString() }] })),
-      updateJournalEntry: (entryId, updates) => set((state) => ({ journalEntries: state.journalEntries.map((entry) => entry.id === entryId ? { ...entry, ...updates } : entry) })),
-      deleteJournalEntry: (entryId) => set((state) => ({ journalEntries: state.journalEntries.filter((entry) => entry.id !== entryId) })),
-      getJournalByCategory: (category) => get().journalEntries.filter((entry) => entry.category === category),
+      addJournalEntry: (entry) =>
+        set((state) => ({
+          journalEntries: [
+            ...state.journalEntries,
+            {
+              ...entry,
+              id: `journal-${Date.now()}`,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        })),
+      updateJournalEntry: (entryId, updates) =>
+        set((state) => ({
+          journalEntries: state.journalEntries.map((entry) =>
+            entry.id === entryId ? { ...entry, ...updates } : entry
+          ),
+        })),
+      deleteJournalEntry: (entryId) =>
+        set((state) => ({
+          journalEntries: state.journalEntries.filter(
+            (entry) => entry.id !== entryId
+          ),
+        })),
+      getJournalByCategory: (category) =>
+        get().journalEntries.filter((entry) => entry.category === category),
 
       budget: INITIAL_BUDGET,
-      addBudgetItem: (item: BudgetItem) => set((state) => ({ budget: { ...state.budget, items: [...state.budget.items, item] } })),
-      removeBudgetItem: (itemId) => set((state) => ({ budget: { ...state.budget, items: state.budget.items.filter((item) => item.id !== itemId) } })),
-      updateBudgetItem: (itemId, updates) => set((state) => ({ budget: { ...state.budget, items: state.budget.items.map((item) => item.id === itemId ? { ...item, ...updates } : item) } })),
-      setBudgetTarget: (amount) => set((state) => ({ budget: { ...state.budget, targetAmount: Math.max(0, amount) } })),
-      setCurrentSavings: (amount) => set((state) => ({ budget: { ...state.budget, currentSavings: Math.max(0, amount) } })),
+      addBudgetItem: (item: BudgetItem) =>
+        set((state) => ({
+          budget: { ...state.budget, items: [...state.budget.items, item] },
+        })),
+      removeBudgetItem: (itemId) =>
+        set((state) => ({
+          budget: {
+            ...state.budget,
+            items: state.budget.items.filter((item) => item.id !== itemId),
+          },
+        })),
+      updateBudgetItem: (itemId, updates) =>
+        set((state) => ({
+          budget: {
+            ...state.budget,
+            items: state.budget.items.map((item) =>
+              item.id === itemId ? { ...item, ...updates } : item
+            ),
+          },
+        })),
+      setBudgetTarget: (amount) =>
+        set((state) => ({
+          budget: { ...state.budget, targetAmount: Math.max(0, amount) },
+        })),
+      setCurrentSavings: (amount) =>
+        set((state) => ({
+          budget: { ...state.budget, currentSavings: Math.max(0, amount) },
+        })),
 
       documents: INITIAL_DOCUMENTS,
-      updateDocumentStatus: (documentId, status) => set((state) => ({ documents: state.documents.map((doc) => doc.id === documentId ? { ...doc, status } : doc) })),
-      addDocument: (doc) => set((state) => ({ documents: [...state.documents, { ...doc, id: `doc-${Date.now()}` }] })),
-      deleteDocument: (documentId) => set((state) => ({ documents: state.documents.filter((doc) => doc.id !== documentId) })),
+      updateDocumentStatus: (documentId, status) =>
+        set((state) => ({
+          documents: state.documents.map((doc) =>
+            doc.id === documentId ? { ...doc, status } : doc
+          ),
+        })),
+      addDocument: (doc) =>
+        set((state) => ({
+          documents: [...state.documents, { ...doc, id: `doc-${Date.now()}` }],
+        })),
+      deleteDocument: (documentId) =>
+        set((state) => ({
+          documents: state.documents.filter((doc) => doc.id !== documentId),
+        })),
 
       achievements: INITIAL_ACHIEVEMENTS,
-      unlockAchievement: (achievementId) => set((state) => ({ achievements: state.achievements.map((achievement) => achievement.id === achievementId && !achievement.unlockedAt ? { ...achievement, unlockedAt: new Date().toISOString() } : achievement) })),
+      unlockAchievement: (achievementId) =>
+        set((state) => ({
+          achievements: state.achievements.map((achievement) =>
+            achievement.id === achievementId && !achievement.unlockedAt
+              ? { ...achievement, unlockedAt: new Date().toISOString() }
+              : achievement
+          ),
+        })),
 
       majorDecisions: [],
-      addMajorDecisionResponse: (response: MajorDecisionResponse) => set((state) => ({ majorDecisions: [...state.majorDecisions, response] })),
+      addMajorDecisionResponse: (response: MajorDecisionResponse) =>
+        set((state) => ({
+          majorDecisions: [...state.majorDecisions, response],
+        })),
 
       getOverallProgress: () => {
         const tasks = allTasks(get().phases);
         if (tasks.length === 0) return 0;
-        return Math.round((tasks.filter((task) => task.status === 'Completed').length / tasks.length) * 100);
+        return Math.round(
+          (tasks.filter((task) => task.status === 'Completed').length /
+            tasks.length) *
+            100
+        );
       },
       getPhaseProgress: (phaseId) => {
         const phase = get().phases.find((candidate) => candidate.id === phaseId);
         if (!phase) return 0;
-        const tasks = phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks));
+        const tasks = phase.months.flatMap((month) =>
+          month.goals.flatMap((goal) => goal.tasks)
+        );
         if (tasks.length === 0) return 0;
-        return Math.round((tasks.filter((task) => task.status === 'Completed').length / tasks.length) * 100);
+        return Math.round(
+          (tasks.filter((task) => task.status === 'Completed').length /
+            tasks.length) *
+            100
+        );
       },
-      getCompletedTaskCount: () => allTasks(get().phases).filter((task) => task.status === 'Completed').length,
+      getCompletedTaskCount: () =>
+        allTasks(get().phases).filter((task) => task.status === 'Completed').length,
       getTotalTaskCount: () => allTasks(get().phases).length,
-      getCurrentPhase: () => get().phases.find((phase) => phase.status === 'In Progress') ?? get().phases[0],
+      getCurrentPhase: () =>
+        get().phases.find((phase) => phase.status === 'In Progress') ??
+        get().phases[0],
       getNextTask: () => {
-        for (const phase of get().phases) for (const month of phase.months) for (const goal of month.goals) {
-          const task = goal.tasks.find((candidate) => candidate.status !== 'Completed');
-          if (task) return task;
+        for (const phase of get().phases) {
+          for (const month of phase.months) {
+            for (const goal of month.goals) {
+              const task = goal.tasks.find(
+                (candidate) => candidate.status !== 'Completed'
+              );
+              if (task) return task;
+            }
+          }
         }
         return undefined;
       },
 
       exportData: () => {
         const state = get();
-        return JSON.stringify({ myWhy: state.myWhy, phases: state.phases, majors: state.majors, skills: state.skills, journalEntries: state.journalEntries, budget: state.budget, documents: state.documents, achievements: state.achievements, majorDecisions: state.majorDecisions });
+        return JSON.stringify({
+          myWhy: state.myWhy,
+          phases: state.phases,
+          majors: state.majors,
+          skills: state.skills,
+          journalEntries: state.journalEntries,
+          budget: state.budget,
+          documents: state.documents,
+          achievements: state.achievements,
+          majorDecisions: state.majorDecisions,
+        });
       },
       importData: (jsonString) => {
         try {
           const parsed = JSON.parse(jsonString) as Partial<JourneyState>;
-          if (!parsed || !Array.isArray(parsed.phases) || !Array.isArray(parsed.majors)) return false;
+          if (!parsed || !Array.isArray(parsed.phases) || !Array.isArray(parsed.majors)) {
+            return false;
+          }
           const phases = recalculatePhases(parsed.phases);
           const majors = recalculateMajors(phases, parsed.majors);
-          const skills = recalculateSkills(phases, Array.isArray(parsed.skills) ? parsed.skills : INITIAL_SKILLS);
-          set({ myWhy: parsed.myWhy ?? get().myWhy, phases, majors, skills, journalEntries: Array.isArray(parsed.journalEntries) ? parsed.journalEntries : [], budget: parsed.budget && Array.isArray(parsed.budget.items) ? parsed.budget : get().budget, documents: Array.isArray(parsed.documents) ? parsed.documents : get().documents, achievements: Array.isArray(parsed.achievements) ? parsed.achievements : get().achievements, majorDecisions: Array.isArray(parsed.majorDecisions) ? parsed.majorDecisions : [] });
+          const skills = recalculateSkills(
+            phases,
+            Array.isArray(parsed.skills) ? parsed.skills : INITIAL_SKILLS
+          );
+          set({
+            myWhy: parsed.myWhy ?? get().myWhy,
+            phases,
+            majors,
+            skills,
+            journalEntries: Array.isArray(parsed.journalEntries)
+              ? parsed.journalEntries
+              : [],
+            budget:
+              parsed.budget && Array.isArray(parsed.budget.items)
+                ? parsed.budget
+                : get().budget,
+            documents: Array.isArray(parsed.documents)
+              ? parsed.documents
+              : get().documents,
+            achievements: Array.isArray(parsed.achievements)
+              ? parsed.achievements
+              : get().achievements,
+            majorDecisions: Array.isArray(parsed.majorDecisions)
+              ? parsed.majorDecisions
+              : [],
+          });
           return true;
-        } catch { return false; }
+        } catch {
+          return false;
+        }
       },
-      resetData: () => set({
-        myWhy: 'I want to understand what kind of person and scientist I want to become, and I want to give myself a real chance to study what I genuinely care about.',
-        phases: recalculatePhases(INITIAL_PHASES),
-        majors: INITIAL_MAJORS.map((major) => ({ ...major, baseConfidenceScore: major.baseConfidenceScore ?? major.confidenceScore })),
-        skills: INITIAL_SKILLS,
-        journalEntries: [],
-        budget: INITIAL_BUDGET,
-        documents: INITIAL_DOCUMENTS,
-        achievements: INITIAL_ACHIEVEMENTS,
-        majorDecisions: [],
-      }),
+      resetData: () =>
+        set({
+          myWhy:
+            'I want to understand what kind of person and scientist I want to become, and I want to give myself a real chance to study what I genuinely care about.',
+          phases: recalculatePhases(INITIAL_PHASES),
+          majors: INITIAL_MAJORS.map((major) => ({
+            ...major,
+            baseConfidenceScore:
+              major.baseConfidenceScore ?? major.confidenceScore,
+          })),
+          skills: INITIAL_SKILLS,
+          journalEntries: [],
+          budget: INITIAL_BUDGET,
+          documents: INITIAL_DOCUMENTS,
+          achievements: INITIAL_ACHIEVEMENTS,
+          majorDecisions: [],
+        }),
     }),
     {
       name: STORAGE_NAME,
