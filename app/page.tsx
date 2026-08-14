@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import {
   CheckCircle2,
@@ -11,6 +12,12 @@ import {
 import { motion } from 'framer-motion';
 
 export default function Dashboard() {
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  useEffect(() => {
+    setHasHydrated(true);
+  }, []);
+
   const myWhy = useJourneyStore((state) => state.myWhy);
   const getOverallProgress = useJourneyStore(
     (state) => state.getOverallProgress
@@ -26,25 +33,25 @@ export default function Dashboard() {
   const documents = useJourneyStore((state) => state.documents);
   const budget = useJourneyStore((state) => state.budget);
 
-  const progressPercent = getOverallProgress();
-  const completedTasks = getCompletedTaskCount();
-  const totalTasks = getTotalTaskCount();
-  const todaysMission = getNextTask();
+  const progressPercent = hasHydrated ? getOverallProgress() : 0;
+  const completedTasks = hasHydrated ? getCompletedTaskCount() : 0;
+  const totalTasks = hasHydrated ? getTotalTaskCount() : 0;
+  const todaysMission = hasHydrated ? getNextTask() : undefined;
 
-  const completedDocuments = documents.filter(
-    (document) =>
-      document.status === 'Ready' || document.status === 'Verified'
-  );
+  const completedDocuments = hasHydrated
+    ? documents.filter(
+        (document) =>
+          document.status === 'Ready' || document.status === 'Verified'
+      )
+    : [];
 
-  const documentProgress =
-    Math.round(
-      (completedDocuments.length / documents.length) * 100
-    ) || 0;
+  const documentProgress = hasHydrated
+    ? Math.round((completedDocuments.length / documents.length) * 100) || 0
+    : 0;
 
-  const totalBudget = budget.items.reduce(
-    (total, item) => total + item.amount,
-    0
-  );
+  const totalBudget = hasHydrated
+    ? budget.items.reduce((total, item) => total + item.amount, 0)
+    : 0;
 
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat('id-ID', {
@@ -59,9 +66,7 @@ export default function Dashboard() {
         <h1 className="text-4xl font-bold tracking-tight text-white mb-2">
           🇰🇷 K-ROADMAP
         </h1>
-        <p className="text-slate-400 text-lg">
-          My Journey to Korea 2027
-        </p>
+        <p className="text-slate-400 text-lg">My Journey to Korea 2027</p>
       </header>
 
       <div className="grid grid-cols-1 gap-6 mb-12 md:grid-cols-3">
@@ -126,7 +131,7 @@ export default function Dashboard() {
                 {formatCurrency(totalBudget)}
               </div>
               <p className="text-xs text-slate-500 mt-2">
-                {budget.items.length} budget items
+                {hasHydrated ? budget.items.length : 0} budget items
               </p>
             </div>
             <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400">
@@ -163,7 +168,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <h3 className="text-2xl font-bold text-emerald-400 mb-6">
-              All caught up! Excellent work.
+              {hasHydrated ? 'All caught up! Excellent work.' : 'Loading mission...'}
             </h3>
           )}
         </div>
