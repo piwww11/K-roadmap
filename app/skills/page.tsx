@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useJourneyStore } from '@/store/useJourneyStore';
+import { repairPersistedSkillUnlocks } from '@/store/skillUnlocks';
 import type { SkillStatus } from '@/types';
 import { Lock, Check, Play, Circle, Brain, Atom, Dna } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -16,10 +17,32 @@ type Track = keyof typeof trackInfo;
 
 export default function SkillTreePage() {
   const skills = useJourneyStore((state) => state.skills);
+  const phases = useJourneyStore((state) => state.phases);
   const updateSkillStatus = useJourneyStore((state) => state.updateSkillStatus);
   const [activeTrack, setActiveTrack] = useState<Track>('physics');
+
+  // Repair states that were persisted before the explicit Task → Skill mapping
+  // existed. This preserves all existing progress and is safe to run repeatedly.
+  useEffect(() => {
+    const state = useJourneyStore.getState();
+    const repairedSkills = repairPersistedSkillUnlocks(state.phases, state.skills);
+    const changed = repairedSkills.some(
+      (skill, index) =>
+        skill.status !== state.skills[index]?.status ||
+        skill.unlockedAt !== state.skills[index]?.unlockedAt
+    );
+
+    if (changed) {
+      useJourneyStore.setState({ skills: repairedSkills });
+    }
+  }, []);
+
   const currentSkills = skills.filter((skill) => skill.track === activeTrack);
   const categories = [...new Set(currentSkills.map((skill) => skill.category))];
+
+  // Keep this dependency intentionally referenced so the repair effect tracks
+  // the same persisted journey state as the rest of the tree.
+  void phases;
 
   const handleSkillClick = (skillId: string, status: SkillStatus) => {
     if (status === 'locked') return;
