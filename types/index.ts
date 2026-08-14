@@ -14,6 +14,9 @@ export interface Major {
   name: string;
   university: string;
   interestScore: number;
+  /** Base/manual confidence before task rewards are applied. */
+  baseConfidenceScore?: number;
+  /** Current confidence score. Derived from base confidence + completed task rewards. */
   confidenceScore: number;
   themeColor: string;
   icon: string;
@@ -33,6 +36,8 @@ export interface Task {
     majorId: string;
     confidenceAmount: number;
   };
+  /** Optional explicit skill unlocks triggered when this task is completed. */
+  unlocksSkillIds?: string[];
   dueDate?: string;
   createdAt: string;
 }
@@ -77,6 +82,10 @@ export interface Skill {
   title: string;
   track: MajorTrack;
   category: string;
+  /** Tasks that must be completed before this skill can unlock. */
+  requiredTaskIds?: string[];
+  /** Other skills that must be completed before this skill can unlock. */
+  requiredSkillIds?: string[];
   status: SkillStatus;
   unlockedAt?: string;
   completedAt?: string;
