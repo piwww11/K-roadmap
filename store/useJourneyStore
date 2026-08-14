@@ -9,7 +9,6 @@ import type {
   Skill,
   JournalEntry,
   BudgetItem,
-  Budget,
   DocumentItem,
   Achievement,
   MajorDecisionResponse,
@@ -28,7 +27,8 @@ import {
 } from './Speed data';
 
 const STORAGE_VERSION = 3;
-const STORAGE_NAME = 'k-roadmap-storage-v3';
+// Keep the existing storage key so Zustand can migrate v2 data instead of silently starting over.
+const STORAGE_NAME = 'k-roadmap-storage-v2';
 
 const clampScore = (value: number) => Math.min(10, Math.max(0, value));
 
@@ -149,7 +149,6 @@ function recalculateSkills(
 ): Skill[] {
   let nextSkills = skills.map((skill) => ({ ...skill }));
 
-  // New explicit dependency system.
   nextSkills = nextSkills.map((skill) => {
     if (skill.status !== 'locked' || !canUnlockSkill(skill, phases, nextSkills)) {
       return skill;
@@ -209,7 +208,13 @@ function recalculateSkills(
 function migratePersistedState(persisted: unknown): unknown {
   if (!persisted || typeof persisted !== 'object') return persisted;
 
-  const state = persisted as Record<string, any>;
+  // Zustand passes the persisted object as { state, version }.
+  const wrapper = persisted as Record<string, any>;
+  const state =
+    wrapper.state && typeof wrapper.state === 'object'
+      ? (wrapper.state as Record<string, any>)
+      : wrapper;
+
   const phases = Array.isArray(state.phases) ? state.phases : INITIAL_PHASES;
   const majors = Array.isArray(state.majors) ? state.majors : INITIAL_MAJORS;
   const rewards = taskRewardsByMajor(phases);
@@ -406,18 +411,19 @@ export const useJourneyStore = create<JourneyState>()(
       updateMajorScore: (majorId, type, score) =>
         set((state) => {
           const nextScore = clampScore(score);
+          const rewards = taskRewardsByMajor(state.phases);
 
           return {
             majors: state.majors.map((major) => {
               if (major.id !== majorId) return major;
               if (type === 'interest') return { ...major, interestScore: nextScore };
 
-              const currentBase = major.baseConfidenceScore ?? major.confidenceScore;
-              const reward = major.confidenceScore - currentBase;
               return {
                 ...major,
                 baseConfidenceScore: nextScore,
-                confidenceScore: Math.round(clampScore(nextScore + reward) * 10) / 10,
+                confidenceScore: Math.round(
+                  clampScore(nextScore + (rewards.get(majorId) ?? 0)) * 10
+                ) / 10,
               };
             }),
           };
