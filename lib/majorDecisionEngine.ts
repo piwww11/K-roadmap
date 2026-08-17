@@ -46,9 +46,17 @@ function taskStats(phases: Phase[], majorId: string) {
 
 function experimentStats(experiments: Experiment[], majorId: string) {
   const relevant = experiments.filter((experiment) => experiment.majorId === majorId);
+  const reflected = relevant.filter((experiment) =>
+    (experiment.attempts ?? []).some((attempt) => Boolean(attempt.reflection)) || Boolean(experiment.reflection)
+  );
+  const attempts = relevant.reduce(
+    (count, experiment) => count + (experiment.attempts?.filter((attempt) => attempt.reflection).length ?? (experiment.reflection ? 1 : 0)),
+    0
+  );
   return {
-    completed: relevant.filter((experiment) => experiment.status === 'completed' && experiment.reflection).length,
+    completed: reflected.length,
     total: relevant.length,
+    attempts,
   };
 }
 
@@ -84,7 +92,7 @@ export function analyzeMajorDecision(
     if (keywordHitsTotal >= 2 || conceptHitsTotal > 0) strengths.push('Your decision answers contain recurring signals connected to this field.');
     if (major.interestScore >= 7) strengths.push('You already report strong interest in this major.');
     if (stats.completed > 0) strengths.push(`You have completed ${stats.completed} exploration task${stats.completed === 1 ? '' : 's'} in this area.`);
-    if (experiment.completed > 0) strengths.push(`You completed ${experiment.completed} experiment${experiment.completed === 1 ? '' : 's'} and reflected on the experience.`);
+    if (experiment.completed > 0) strengths.push(`You reflected on ${experiment.completed} experiment${experiment.completed === 1 ? '' : 's'} in this area across ${experiment.attempts} attempt${experiment.attempts === 1 ? '' : 's'}.`);
 
     const uncertainties: string[] = [];
     if (stats.completed === 0 && experiment.completed === 0) uncertainties.push('There is not enough hands-on roadmap evidence yet.');
