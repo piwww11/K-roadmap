@@ -6,6 +6,7 @@ export type DocumentStatus = 'Not Started' | 'In Progress' | 'Ready' | 'Verified
 export type BudgetCategory = 'Application' | 'Document' | 'Travel' | 'Other' | 'Language Test' | 'Translation' | 'Authentication' | 'Transportation';
 export type JournalCategory = 'Physics' | 'BCS' | 'Life Science' | 'GKS' | 'Mathematics' | 'Personal' | 'University Research';
 export type MajorTrack = 'physics' | 'bcs' | 'life-science';
+export type ExperimentStatus = 'planned' | 'in-progress' | 'completed' | 'skipped';
 
 export interface Major {
   id: string;
@@ -90,6 +91,28 @@ export interface JournalEntry {
   createdAt: string;
 }
 
+export interface Experiment {
+  id: string;
+  title: string;
+  description: string;
+  majorId: string;
+  estimatedMinutes: number;
+  status: ExperimentStatus;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  reflection?: ExperimentReflection;
+}
+
+export interface ExperimentReflection {
+  interest: number;
+  energy: number;
+  difficulty: number;
+  wouldDoAgain: boolean;
+  notes: string;
+  createdAt: string;
+}
+
 export interface BudgetItem { id: string; name: string; amount: number; category: BudgetCategory; dueDate?: string; notes?: string; }
 export interface Budget { items: BudgetItem[]; targetAmount: number; currentSavings: number; }
 export interface DocumentItem { id: string; name: string; description: string; status: DocumentStatus; category: string; dueDate?: string; notes?: string; reference?: string; }
@@ -119,6 +142,8 @@ export interface MajorDecisionAnalysis {
   recommendedNextSteps: string[];
   completedExplorationTasks: number;
   totalExplorationTasks: number;
+  completedExperiments: number;
+  totalExperiments: number;
 }
 
 export interface MajorDecisionResult {
@@ -152,6 +177,11 @@ export interface JourneyState {
   updateJournalEntry: (entryId: string, updates: Partial<JournalEntry>) => void;
   deleteJournalEntry: (entryId: string) => void;
   getJournalByCategory: (category: JournalCategory) => JournalEntry[];
+  experiments: Experiment[];
+  addExperiment: (experiment: Omit<Experiment, 'id' | 'createdAt'>) => void;
+  updateExperiment: (experimentId: string, updates: Partial<Experiment>) => void;
+  deleteExperiment: (experimentId: string) => void;
+  saveExperimentReflection: (experimentId: string, reflection: Omit<ExperimentReflection, 'createdAt'>) => void;
   budget: Budget;
   addBudgetItem: (item: BudgetItem) => void;
   removeBudgetItem: (itemId: string) => void;
