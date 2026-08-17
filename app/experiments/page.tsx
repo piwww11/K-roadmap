@@ -15,7 +15,7 @@ const STATUS_LABELS = {
 
 export default function ExperimentsPage() {
   const experiments = useExperimentStore((state) => state.experiments);
-  const updateExperiment = useExperimentStore((state) => state.updateExperiment);
+  const startExperiment = useExperimentStore((state) => state.startExperiment);
   const saveReflection = useExperimentStore((state) => state.saveReflection);
   const resetExperiments = useExperimentStore((state) => state.resetExperiments);
   const majors = useJourneyStore((state) => state.majors);
@@ -26,7 +26,9 @@ export default function ExperimentsPage() {
   const [wouldDoAgain, setWouldDoAgain] = useState(true);
   const [notes, setNotes] = useState('');
 
-  const completed = experiments.filter((experiment) => experiment.status === 'completed').length;
+  const completed = experiments.filter((experiment) =>
+    experiment.attempts?.some((attempt) => Boolean(attempt.reflection))
+  ).length;
   const progress = experiments.length ? Math.round((completed / experiments.length) * 100) : 0;
 
   const grouped = useMemo(() => majors.map((major) => ({
@@ -34,20 +36,19 @@ export default function ExperimentsPage() {
     experiments: experiments.filter((experiment) => experiment.majorId === major.id),
   })).filter((group) => group.experiments.length), [experiments, majors]);
 
-  const begin = (id: string) => {
-    updateExperiment(id, {
-      status: 'in-progress',
-      startedAt: new Date().toISOString(),
-    });
-  };
+  const latestAttempt = (experiment: typeof experiments[number]) =>
+    experiment.attempts?.[experiment.attempts.length - 1];
+
+  const begin = (id: string) => startExperiment(id);
 
   const openReflection = (id: string) => {
     const experiment = experiments.find((item) => item.id === id);
-    setInterest(experiment?.reflection?.interest ?? 3);
-    setEnergy(experiment?.reflection?.energy ?? 3);
-    setDifficulty(experiment?.reflection?.difficulty ?? 3);
-    setWouldDoAgain(experiment?.reflection?.wouldDoAgain ?? true);
-    setNotes(experiment?.reflection?.notes ?? '');
+    const attempt = experiment ? latestAttempt(experiment) : undefined;
+    setInterest(attempt?.reflection?.interest ?? 3);
+    setEnergy(attempt?.reflection?.energy ?? 3);
+    setDifficulty(attempt?.reflection?.difficulty ?? 3);
+    setWouldDoAgain(attempt?.reflection?.wouldDoAgain ?? true);
+    setNotes(attempt?.reflection?.notes ?? '');
     setReflectionId(id);
   };
 
@@ -82,18 +83,23 @@ export default function ExperimentsPage() {
             <section key={major.id}>
               <div className="mb-4 flex items-center gap-3"><span className="text-2xl">{major.icon}</span><div><h2 className="text-2xl font-bold text-white">{major.name}</h2><p className="text-sm text-slate-500">{major.university}</p></div></div>
               <div className="grid gap-4 md:grid-cols-2">
-                {majorExperiments.map((experiment) => (
-                  <article key={experiment.id} className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-                    <div className="flex items-start justify-between gap-4"><div><h3 className="text-lg font-semibold text-white">{experiment.title}</h3><p className="mt-2 text-sm leading-relaxed text-slate-400">{experiment.description}</p></div><FlaskConical className="shrink-0 text-cyan-400" size={22} /></div>
-                    <div className="mt-5 flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-slate-800 px-3 py-1 text-slate-400">{experiment.estimatedMinutes} min</span><span className="rounded-full bg-slate-800 px-3 py-1 text-slate-400">{STATUS_LABELS[experiment.status]}</span></div>
-                    {experiment.reflection && <div className="mt-5 rounded-xl bg-slate-950/70 p-4"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Latest reflection</p><p className="mt-2 text-sm text-slate-300">Interest {experiment.reflection.interest}/5 · Energy {experiment.reflection.energy}/5 · Difficulty {experiment.reflection.difficulty}/5 · {experiment.reflection.wouldDoAgain ? 'Would do again' : 'Would not do again'}</p>{experiment.reflection.notes && <p className="mt-2 text-sm italic text-slate-400">“{experiment.reflection.notes}”</p>}</div>}
-                    <div className="mt-5 flex flex-wrap gap-3">
-                      {experiment.status === 'planned' && <button onClick={() => begin(experiment.id)} className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"><Play size={16} /> Start experiment</button>}
-                      {experiment.status === 'in-progress' && <button onClick={() => openReflection(experiment.id)} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-500"><CheckCircle2 size={16} /> Reflect & complete</button>}
-                      {experiment.status === 'completed' && <button onClick={() => openReflection(experiment.id)} className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800">Update reflection</button>}
-                    </div>
-                  </article>
-                ))}
+                {majorExperiments.map((experiment) => {
+                  const attempts = experiment.attempts ?? [];
+                  const latest = latestAttempt(experiment);
+                  return (
+                    <article key={experiment.id} className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+                      <div className="flex items-start justify-between gap-4"><div><h3 className="text-lg font-semibold text-white">{experiment.title}</h3><p className="mt-2 text-sm leading-relaxed text-slate-400">{experiment.description}</p></div><FlaskConical className="shrink-0 text-cyan-400" size={22} /></div>
+                      <div className="mt-5 flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-slate-800 px-3 py-1 text-slate-400">{experiment.estimatedMinutes} min</span><span className="rounded-full bg-slate-800 px-3 py-1 text-slate-400">{STATUS_LABELS[experiment.status]}</span><span className="rounded-full bg-slate-800 px-3 py-1 text-slate-400">{attempts.length} attempt{attempts.length === 1 ? '' : 's'}</span></div>
+                      {latest?.reflection && <div className="mt-5 rounded-xl bg-slate-950/70 p-4"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Latest reflection</p><p className="mt-2 text-sm text-slate-300">Interest {latest.reflection.interest}/5 · Energy {latest.reflection.energy}/5 · Difficulty {latest.reflection.difficulty}/5 · {latest.reflection.wouldDoAgain ? 'Would do again' : 'Would not do again'}</p>{latest.reflection.notes && <p className="mt-2 text-sm italic text-slate-400">“{latest.reflection.notes}”</p>}</div>}
+                      {attempts.length > 1 && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Attempt history</p><div className="mt-3 space-y-2">{attempts.map((attempt, index) => <div key={attempt.id} className="flex items-center justify-between text-xs text-slate-400"><span>Attempt #{index + 1}</span><span>{attempt.reflection ? `Interest ${attempt.reflection.interest}/5 · ${attempt.reflection.wouldDoAgain ? 'Repeat' : 'No repeat'}` : 'In progress'}</span></div>)}</div></div>}
+                      <div className="mt-5 flex flex-wrap gap-3">
+                        {experiment.status === 'planned' && <button onClick={() => begin(experiment.id)} className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"><Play size={16} /> Start experiment</button>}
+                        {experiment.status === 'in-progress' && <button onClick={() => openReflection(experiment.id)} className="flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-500"><CheckCircle2 size={16} /> Reflect & complete</button>}
+                        {experiment.status === 'completed' && <><button onClick={() => begin(experiment.id)} className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"><Play size={16} /> Run again</button><button onClick={() => openReflection(experiment.id)} className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800">Update latest reflection</button></>}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             </section>
           ))}
