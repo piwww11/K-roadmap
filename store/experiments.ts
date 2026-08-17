@@ -9,6 +9,7 @@ export const INITIAL_EXPERIMENTS: Experiment[] = [
     estimatedMinutes: 45,
     status: 'planned',
     createdAt: '2026-08-17T00:00:00.000Z',
+    attempts: [],
   },
   {
     id: 'exp-bcs-cognition',
@@ -18,6 +19,7 @@ export const INITIAL_EXPERIMENTS: Experiment[] = [
     estimatedMinutes: 30,
     status: 'planned',
     createdAt: '2026-08-17T00:00:00.000Z',
+    attempts: [],
   },
   {
     id: 'exp-life-dna',
@@ -27,5 +29,6 @@ export const INITIAL_EXPERIMENTS: Experiment[] = [
     estimatedMinutes: 45,
     status: 'planned',
     createdAt: '2026-08-17T00:00:00.000Z',
+    attempts: [],
   },
 ];
