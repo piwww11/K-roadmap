@@ -1,21 +1,46 @@
 import type { Major, MajorDecisionAnalysis, MajorDecisionResponse, MajorDecisionResult, Phase } from '@/types';
 
 const MAJOR_KEYWORDS: Record<string, string[]> = {
-  m1: ['physics', 'fisika', 'mechanics', 'mechanika', 'quantum', 'kuantum', 'space', 'astronomy', 'astronomi', 'experiment', 'eksperimen', 'mathematics', 'matematika'],
-  m2: ['brain', 'otak', 'cognitive', 'kognitif', 'neuroscience', 'neurosains', 'psychology', 'psikologi', 'neural', 'neuron', 'behavior', 'perilaku'],
-  m3: ['biology', 'biologi', 'life science', 'genetics', 'genetik', 'molecular', 'molekuler', 'cell', 'sel', 'bioinformatics', 'bioinformatika', 'biomedical', 'biomedis'],
+  m1: ['physics', 'fisika', 'mechanics', 'mechanika', 'quantum', 'kuantum', 'space', 'astronomy', 'astronomi', 'vectors', 'vektor', 'waves', 'gelombang', 'motion', 'gerak', 'experiment', 'eksperimen', 'mathematics', 'matematika'],
+  m2: ['brain', 'otak', 'cognitive', 'kognitif', 'neuroscience', 'neurosains', 'psychology', 'psikologi', 'neural', 'neuron', 'behavior', 'perilaku', 'intelligence', 'kecerdasan', 'memory', 'memori'],
+  m3: ['biology', 'biologi', 'life science', 'genetics', 'genetik', 'molecular', 'molekuler', 'cell', 'sel', 'bioinformatics', 'bioinformatika', 'biomedical', 'biomedis', 'dna', 'rna', 'organism', 'organisme'],
 };
 
-const QUESTIONS: (keyof MajorDecisionResponse)[] = ['q1_most_curious', 'q2_willing_to_struggle', 'q3_enjoy_most', 'q4_math_feeling', 'q5_most_enjoyable_experiment', 'q6_voluntary_research', 'q7_without_name'];
+const MAJOR_CONCEPTS: Record<string, string[]> = {
+  m1: ['how nature works', 'understand how the universe works', 'why things happen', 'fundamental laws', 'physical world', 'alam bekerja', 'hukum alam', 'alam semesta'],
+  m2: ['how the brain works', 'how people think', 'human mind', 'how we learn', 'decision making', 'cara otak bekerja', 'cara manusia berpikir', 'pikiran manusia'],
+  m3: ['how life works', 'living systems', 'how cells work', 'disease mechanisms', 'biological systems', 'cara kehidupan bekerja', 'sistem kehidupan', 'cara sel bekerja'],
+};
+
+const QUESTIONS: (keyof MajorDecisionResponse)[] = [
+  'q1_most_curious',
+  'q2_willing_to_struggle',
+  'q3_enjoy_most',
+  'q4_math_feeling',
+  'q5_most_enjoyable_experiment',
+  'q6_voluntary_research',
+  'q7_without_name',
+];
 
 function keywordHits(answer: string, majorId: string): number {
   const text = answer.toLowerCase().trim();
   return (MAJOR_KEYWORDS[majorId] ?? []).reduce((count, keyword) => count + (text.includes(keyword) ? 1 : 0), 0);
 }
 
+function conceptHits(answer: string, majorId: string): number {
+  const text = answer.toLowerCase().trim();
+  return (MAJOR_CONCEPTS[majorId] ?? []).reduce((count, phrase) => count + (text.includes(phrase) ? 1 : 0), 0);
+}
+
 function taskStats(phases: Phase[], majorId: string) {
   const tasks = phases.flatMap((phase) => phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks)));
-  const exploration = tasks.filter((task) => task.majorReward?.majorId === majorId);
+  const exploration = tasks.filter((task) => {
+    // New tasks should declare explorationMajorIds explicitly. The legacy
+    // majorReward fallback keeps old persisted roadmaps compatible while the
+    // data model is being migrated.
+    const explicit = task.explorationMajorIds ?? [];
+    return explicit.includes(majorId) || (!task.explorationMajorIds && task.majorReward?.majorId === majorId);
+  });
   return {
     completed: exploration.filter((task) => task.status === 'Completed').length,
     total: exploration.length,
@@ -31,23 +56,27 @@ function levelFor(completed: number, total: number): MajorDecisionAnalysis['evid
 export function analyzeMajorDecision(response: MajorDecisionResponse, majors: Major[], phases: Phase[]): MajorDecisionResult {
   const analyses = majors.map((major) => {
     const stats = taskStats(phases, major.id);
-    const hits = QUESTIONS.reduce((sum, question) => sum + keywordHits(response[question], major.id), 0);
-    const keywordScore = Math.min(35, hits * 7);
-    const interestScore = Math.round(Math.min(25, major.interestScore * 2.5));
-    const confidenceScore = Math.round(Math.min(20, major.confidenceScore * 2));
-    const explorationScore = stats.total === 0 ? 0 : Math.round((stats.completed / stats.total) * 20);
-    const score = Math.min(100, keywordScore + interestScore + confidenceScore + explorationScore);
+    const keywordHitsTotal = QUESTIONS.reduce((sum, question) => sum + keywordHits(response[question], major.id), 0);
+    const conceptHitsTotal = QUESTIONS.reduce((sum, question) => sum + conceptHits(response[question], major.id), 0);
+
+    // Questionnaire signal is deliberately bounded. A phrase match can
+    // strengthen a signal, but it can never dominate actual roadmap evidence.
+    const languageSignal = Math.min(40, keywordHitsTotal * 5 + conceptHitsTotal * 8);
+    const interestSignal = Math.round(Math.min(20, major.interestScore * 2));
+    const confidenceSignal = Math.round(Math.min(15, major.confidenceScore * 1.5));
+    const explorationSignal = stats.total === 0 ? 0 : Math.round((stats.completed / stats.total) * 25);
+    const score = Math.min(100, languageSignal + interestSignal + confidenceSignal + explorationSignal);
     const evidenceLevel = levelFor(stats.completed, stats.total);
 
     const strengths: string[] = [];
-    if (hits >= 2) strengths.push('Your decision answers repeatedly point toward this field.');
+    if (keywordHitsTotal >= 2 || conceptHitsTotal > 0) strengths.push('Your decision answers contain recurring signals connected to this field.');
     if (major.interestScore >= 7) strengths.push('You already report strong interest in this major.');
     if (stats.completed > 0) strengths.push(`You have completed ${stats.completed} exploration task${stats.completed === 1 ? '' : 's'} in this area.`);
 
     const uncertainties: string[] = [];
     if (stats.completed === 0) uncertainties.push('There is not enough hands-on roadmap evidence yet.');
     if (major.confidenceScore < 5) uncertainties.push('Your current confidence is still relatively low.');
-    if (hits === 0) uncertainties.push('The latest decision answers do not contain a clear signal for this field.');
+    if (keywordHitsTotal === 0 && conceptHitsTotal === 0) uncertainties.push('The latest decision answers do not contain a clear signal for this field.');
 
     const recommendedNextSteps: string[] = [];
     if (stats.total > stats.completed) recommendedNextSteps.push('Complete another exploration task in this major.');
@@ -58,7 +87,7 @@ export function analyzeMajorDecision(response: MajorDecisionResponse, majors: Ma
     return {
       majorId: major.id,
       score,
-      confidence: Math.min(100, Math.round(((keywordScore + explorationScore) / 55) * 100)),
+      confidence: Math.min(100, Math.round(((languageSignal + explorationSignal) / 65) * 100)),
       evidenceLevel,
       strengths,
       uncertainties,
@@ -81,5 +110,11 @@ export function analyzeMajorDecision(response: MajorDecisionResponse, majors: Ma
     else recommendationStatus = 'exploring';
   }
 
-  return { id: `decision-${response.timestamp}`, createdAt: response.timestamp, analyses: ranked, topMajorId: leader?.majorId, recommendationStatus };
+  return {
+    id: `decision-${response.timestamp}`,
+    createdAt: response.timestamp,
+    analyses: ranked,
+    topMajorId: leader?.majorId,
+    recommendationStatus,
+  };
 }
