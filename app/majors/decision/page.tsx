@@ -32,12 +32,15 @@ export default function MajorDecisionPage() {
           <p className="mb-2 text-sm font-semibold uppercase tracking-widest text-indigo-400">K-ROADMAP / INTELLIGENCE</p>
           <h1 className="text-4xl font-bold text-white">Major Decision Intelligence</h1>
           <p className="mt-3 max-w-3xl text-slate-400">A deterministic, explainable analysis of your decision answers and real roadmap exploration. This is evidence, not a final verdict.</p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <a href="/majors/decision/questionnaire" className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">{decisions.length ? 'Run a new decision' : 'Start Major Decision'}</a>
+          </div>
         </header>
 
         {decisions.length === 0 ? (
           <section className="rounded-2xl border border-slate-800 bg-slate-900 p-8">
             <h2 className="text-xl font-semibold">No decision response yet</h2>
-            <p className="mt-2 text-slate-400">Complete the Major Decision questionnaire first. Your result will appear here automatically.</p>
+            <p className="mt-2 text-slate-400">Start the questionnaire above. Your result will be generated from your answers and roadmap exploration evidence.</p>
           </section>
         ) : result ? (
           <>
