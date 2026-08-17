@@ -177,11 +177,6 @@ export interface JourneyState {
   updateJournalEntry: (entryId: string, updates: Partial<JournalEntry>) => void;
   deleteJournalEntry: (entryId: string) => void;
   getJournalByCategory: (category: JournalCategory) => JournalEntry[];
-  experiments: Experiment[];
-  addExperiment: (experiment: Omit<Experiment, 'id' | 'createdAt'>) => void;
-  updateExperiment: (experimentId: string, updates: Partial<Experiment>) => void;
-  deleteExperiment: (experimentId: string) => void;
-  saveExperimentReflection: (experimentId: string, reflection: Omit<ExperimentReflection, 'createdAt'>) => void;
   budget: Budget;
   addBudgetItem: (item: BudgetItem) => void;
   removeBudgetItem: (itemId: string) => void;
