@@ -1,4 +1,4 @@
-import type { Major, MajorDecisionAnalysis, MajorDecisionResponse, MajorDecisionResult, Phase } from '@/types';
+import type { Experiment, Major, MajorDecisionAnalysis, MajorDecisionResponse, MajorDecisionResult, Phase } from '@/types';
 
 const MAJOR_KEYWORDS: Record<string, string[]> = {
   m1: ['physics', 'fisika', 'mechanics', 'mechanika', 'quantum', 'kuantum', 'space', 'astronomy', 'astronomi', 'vectors', 'vektor', 'waves', 'gelombang', 'motion', 'gerak', 'experiment', 'eksperimen', 'mathematics', 'matematika'],
@@ -35,9 +35,6 @@ function conceptHits(answer: string, majorId: string): number {
 function taskStats(phases: Phase[], majorId: string) {
   const tasks = phases.flatMap((phase) => phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks)));
   const exploration = tasks.filter((task) => {
-    // New tasks should declare explorationMajorIds explicitly. The legacy
-    // majorReward fallback keeps old persisted roadmaps compatible while the
-    // data model is being migrated.
     const explicit = task.explorationMajorIds ?? [];
     return explicit.includes(majorId) || (!task.explorationMajorIds && task.majorReward?.majorId === majorId);
   });
@@ -47,40 +44,58 @@ function taskStats(phases: Phase[], majorId: string) {
   };
 }
 
-function levelFor(completed: number, total: number): MajorDecisionAnalysis['evidenceLevel'] {
-  if (completed >= 3 || (total > 0 && completed / total >= 0.6)) return 'strong';
+function experimentStats(experiments: Experiment[], majorId: string) {
+  const relevant = experiments.filter((experiment) => experiment.majorId === majorId);
+  return {
+    completed: relevant.filter((experiment) => experiment.status === 'completed' && experiment.reflection).length,
+    total: relevant.length,
+  };
+}
+
+function levelFor(completedTasks: number, completedExperiments: number, totalEvidence: number): MajorDecisionAnalysis['evidenceLevel'] {
+  const completed = completedTasks + completedExperiments;
+  if (completed >= 3 || (totalEvidence > 0 && completed / totalEvidence >= 0.6)) return 'strong';
   if (completed > 0) return 'developing';
   return 'low';
 }
 
-export function analyzeMajorDecision(response: MajorDecisionResponse, majors: Major[], phases: Phase[]): MajorDecisionResult {
+export function analyzeMajorDecision(
+  response: MajorDecisionResponse,
+  majors: Major[],
+  phases: Phase[],
+  experiments: Experiment[] = []
+): MajorDecisionResult {
   const analyses = majors.map((major) => {
     const stats = taskStats(phases, major.id);
+    const experiment = experimentStats(experiments, major.id);
     const keywordHitsTotal = QUESTIONS.reduce((sum, question) => sum + keywordHits(response[question], major.id), 0);
     const conceptHitsTotal = QUESTIONS.reduce((sum, question) => sum + conceptHits(response[question], major.id), 0);
 
-    // Questionnaire signal is deliberately bounded. A phrase match can
-    // strengthen a signal, but it can never dominate actual roadmap evidence.
     const languageSignal = Math.min(40, keywordHitsTotal * 5 + conceptHitsTotal * 8);
     const interestSignal = Math.round(Math.min(20, major.interestScore * 2));
     const confidenceSignal = Math.round(Math.min(15, major.confidenceScore * 1.5));
-    const explorationSignal = stats.total === 0 ? 0 : Math.round((stats.completed / stats.total) * 25);
+    const taskSignal = stats.total === 0 ? 0 : Math.round((stats.completed / stats.total) * 15);
+    const experimentSignal = experiment.total === 0 ? 0 : Math.round((experiment.completed / experiment.total) * 10);
+    const explorationSignal = Math.min(25, taskSignal + experimentSignal);
     const score = Math.min(100, languageSignal + interestSignal + confidenceSignal + explorationSignal);
-    const evidenceLevel = levelFor(stats.completed, stats.total);
+    const evidenceLevel = levelFor(stats.completed, experiment.completed, stats.total + experiment.total);
 
     const strengths: string[] = [];
     if (keywordHitsTotal >= 2 || conceptHitsTotal > 0) strengths.push('Your decision answers contain recurring signals connected to this field.');
     if (major.interestScore >= 7) strengths.push('You already report strong interest in this major.');
     if (stats.completed > 0) strengths.push(`You have completed ${stats.completed} exploration task${stats.completed === 1 ? '' : 's'} in this area.`);
+    if (experiment.completed > 0) strengths.push(`You completed ${experiment.completed} experiment${experiment.completed === 1 ? '' : 's'} and reflected on the experience.`);
 
     const uncertainties: string[] = [];
-    if (stats.completed === 0) uncertainties.push('There is not enough hands-on roadmap evidence yet.');
+    if (stats.completed === 0 && experiment.completed === 0) uncertainties.push('There is not enough hands-on roadmap evidence yet.');
     if (major.confidenceScore < 5) uncertainties.push('Your current confidence is still relatively low.');
     if (keywordHitsTotal === 0 && conceptHitsTotal === 0) uncertainties.push('The latest decision answers do not contain a clear signal for this field.');
+    if (experiment.completed > 0 && experiment.completed < experiment.total) uncertainties.push('You have started exploring this field but have not reflected on every experiment yet.');
 
     const recommendedNextSteps: string[] = [];
+    if (experiment.total > experiment.completed) recommendedNextSteps.push('Run and reflect on another small experiment in this major.');
     if (stats.total > stats.completed) recommendedNextSteps.push('Complete another exploration task in this major.');
-    if (stats.completed === 0) recommendedNextSteps.push('Run a small hands-on experiment before making a commitment.');
+    if (stats.completed === 0 && experiment.completed === 0) recommendedNextSteps.push('Run a small hands-on experiment before making a commitment.');
     if (major.confidenceScore < 5) recommendedNextSteps.push('Reflect on what specifically makes you uncertain about this field.');
     if (recommendedNextSteps.length === 0) recommendedNextSteps.push('Keep logging real experiences before treating this result as final.');
 
@@ -94,13 +109,15 @@ export function analyzeMajorDecision(response: MajorDecisionResponse, majors: Ma
       recommendedNextSteps,
       completedExplorationTasks: stats.completed,
       totalExplorationTasks: stats.total,
+      completedExperiments: experiment.completed,
+      totalExperiments: experiment.total,
     };
   });
 
   const ranked = [...analyses].sort((a, b) => b.score - a.score);
   const leader = ranked[0];
   const runnerUp = ranked[1];
-  const enoughEvidence = analyses.some((analysis) => analysis.completedExplorationTasks > 0);
+  const enoughEvidence = analyses.some((analysis) => analysis.completedExplorationTasks > 0 || analysis.completedExperiments > 0);
   const gap = leader && runnerUp ? leader.score - runnerUp.score : 0;
 
   let recommendationStatus: MajorDecisionResult['recommendationStatus'] = 'insufficient-evidence';
