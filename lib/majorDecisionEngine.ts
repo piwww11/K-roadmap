@@ -1,46 +1,25 @@
-import type {
-  Major,
-  MajorDecisionAnalysis,
-  MajorDecisionResponse,
-  MajorDecisionResult,
-  Phase,
-} from '@/types';
+import type { Major, MajorDecisionAnalysis, MajorDecisionResponse, MajorDecisionResult, Phase } from '@/types';
 
 const MAJOR_KEYWORDS: Record<string, string[]> = {
-  physics: ['physics', 'fisika', 'mechanics', 'mechanika', 'quantum', 'kuantum', 'space', 'astronomy', 'astronomi', 'experiment', 'eksperimen', 'mathematics', 'matematika'],
-  bcs: ['brain', 'otak', 'cognitive', 'kognitif', 'neuroscience', 'neurosains', 'psychology', 'psikologi', 'neural', 'neuron', 'behavior', 'perilaku'],
-  'life-science': ['biology', 'biologi', 'life science', 'genetics', 'genetik', 'molecular', 'molekuler', 'cell', 'sel', 'bioinformatics', 'bioinformatika', 'biomedical', 'biomedis'],
+  m1: ['physics', 'fisika', 'mechanics', 'mechanika', 'quantum', 'kuantum', 'space', 'astronomy', 'astronomi', 'experiment', 'eksperimen', 'mathematics', 'matematika'],
+  m2: ['brain', 'otak', 'cognitive', 'kognitif', 'neuroscience', 'neurosains', 'psychology', 'psikologi', 'neural', 'neuron', 'behavior', 'perilaku'],
+  m3: ['biology', 'biologi', 'life science', 'genetics', 'genetik', 'molecular', 'molekuler', 'cell', 'sel', 'bioinformatics', 'bioinformatika', 'biomedical', 'biomedis'],
 };
 
-const QUESTIONS: (keyof MajorDecisionResponse)[] = [
-  'q1_most_curious',
-  'q2_willing_to_struggle',
-  'q3_enjoy_most',
-  'q4_math_feeling',
-  'q5_most_enjoyable_experiment',
-  'q6_voluntary_research',
-  'q7_without_name',
-];
-
-function normalize(value: string): string {
-  return value.toLowerCase().trim();
-}
+const QUESTIONS: (keyof MajorDecisionResponse)[] = ['q1_most_curious', 'q2_willing_to_struggle', 'q3_enjoy_most', 'q4_math_feeling', 'q5_most_enjoyable_experiment', 'q6_voluntary_research', 'q7_without_name'];
 
 function keywordHits(answer: string, majorId: string): number {
-  const text = normalize(answer);
-  return (MAJOR_KEYWORDS[majorId] ?? []).reduce(
-    (count, keyword) => count + (text.includes(keyword) ? 1 : 0),
-    0,
-  );
+  const text = answer.toLowerCase().trim();
+  return (MAJOR_KEYWORDS[majorId] ?? []).reduce((count, keyword) => count + (text.includes(keyword) ? 1 : 0), 0);
 }
 
 function taskStats(phases: Phase[], majorId: string) {
-  const tasks = phases.flatMap((phase) =>
-    phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks)),
-  );
+  const tasks = phases.flatMap((phase) => phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks)));
   const exploration = tasks.filter((task) => task.majorReward?.majorId === majorId);
-  const completed = exploration.filter((task) => task.status === 'Completed').length;
-  return { completed, total: exploration.length };
+  return {
+    completed: exploration.filter((task) => task.status === 'Completed').length,
+    total: exploration.length,
+  };
 }
 
 function levelFor(completed: number, total: number): MajorDecisionAnalysis['evidenceLevel'] {
@@ -49,11 +28,7 @@ function levelFor(completed: number, total: number): MajorDecisionAnalysis['evid
   return 'low';
 }
 
-export function analyzeMajorDecision(
-  response: MajorDecisionResponse,
-  majors: Major[],
-  phases: Phase[],
-): MajorDecisionResult {
+export function analyzeMajorDecision(response: MajorDecisionResponse, majors: Major[], phases: Phase[]): MajorDecisionResult {
   const analyses = majors.map((major) => {
     const stats = taskStats(phases, major.id);
     const hits = QUESTIONS.reduce((sum, question) => sum + keywordHits(response[question], major.id), 0);
@@ -83,7 +58,7 @@ export function analyzeMajorDecision(
     return {
       majorId: major.id,
       score,
-      confidence: Math.round((keywordScore + explorationScore) / 55 * 100),
+      confidence: Math.min(100, Math.round(((keywordScore + explorationScore) / 55) * 100)),
       evidenceLevel,
       strengths,
       uncertainties,
@@ -106,11 +81,5 @@ export function analyzeMajorDecision(
     else recommendationStatus = 'exploring';
   }
 
-  return {
-    id: `decision-${response.timestamp}`,
-    createdAt: response.timestamp,
-    analyses: ranked,
-    topMajorId: leader?.majorId,
-    recommendationStatus,
-  };
+  return { id: `decision-${response.timestamp}`, createdAt: response.timestamp, analyses: ranked, topMajorId: leader?.majorId, recommendationStatus };
 }
