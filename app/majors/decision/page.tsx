@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useJourneyStore } from '@/store/useJourneyStore';
+import { useExperimentStore } from '@/store/experimentStore';
 import { analyzeMajorDecision } from '@/lib/majorDecisionEngine';
 
 const QUESTIONS = ['q1_most_curious','q2_willing_to_struggle','q3_enjoy_most','q4_math_feeling','q5_most_enjoyable_experiment','q6_voluntary_research','q7_without_name'] as const;
@@ -20,9 +21,10 @@ export default function MajorDecisionPage() {
   const majors = useJourneyStore((state) => state.majors);
   const phases = useJourneyStore((state) => state.phases);
   const decisions = useJourneyStore((state) => state.majorDecisions);
+  const experiments = useExperimentStore((state) => state.experiments);
   const [selected, setSelected] = useState(0);
   const response = decisions[selected];
-  const result = response ? analyzeMajorDecision(response, majors, phases) : undefined;
+  const result = response ? analyzeMajorDecision(response, majors, phases, experiments) : undefined;
   const majorName = (id?: string) => majors.find((major) => major.id === id)?.name ?? 'Unknown major';
 
   return (
@@ -34,6 +36,7 @@ export default function MajorDecisionPage() {
           <p className="mt-3 max-w-3xl text-slate-400">A deterministic, explainable analysis of your decision answers and real roadmap exploration. This is evidence, not a final verdict.</p>
           <div className="mt-5 flex flex-wrap gap-3">
             <a href="/majors/decision/questionnaire" className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">{decisions.length ? 'Run a new decision' : 'Start Major Decision'}</a>
+            <a href="/experiments" className="rounded-xl border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-900">Run an experiment →</a>
           </div>
         </header>
 
@@ -61,7 +64,7 @@ export default function MajorDecisionPage() {
               {result.analyses.map((analysis, index) => (
                 <article key={analysis.majorId} className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                    <div><div className="flex items-center gap-3"><span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-400">#{index + 1}</span><h3 className="text-2xl font-bold text-white">{majorName(analysis.majorId)}</h3></div><p className="mt-2 text-sm text-slate-500">Evidence: {analysis.evidenceLevel} · Exploration: {analysis.completedExplorationTasks}/{analysis.totalExplorationTasks} tasks</p></div>
+                    <div><div className="flex items-center gap-3"><span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-400">#{index + 1}</span><h3 className="text-2xl font-bold text-white">{majorName(analysis.majorId)}</h3></div><p className="mt-2 text-sm text-slate-500">Evidence: {analysis.evidenceLevel} · Tasks: {analysis.completedExplorationTasks}/{analysis.totalExplorationTasks} · Experiments: {analysis.completedExperiments}/{analysis.totalExperiments}</p></div>
                     <div className="text-right"><div className="text-3xl font-bold text-white">{analysis.score}</div><div className="text-xs uppercase tracking-wider text-slate-500">/ 100</div></div>
                   </div>
                   <div className="mt-6 grid gap-4 md:grid-cols-3">
