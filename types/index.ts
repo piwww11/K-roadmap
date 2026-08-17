@@ -27,6 +27,7 @@ export interface Task {
   status: TaskStatus;
   category: string;
   majorReward?: { majorId: string; confidenceAmount: number };
+  explorationMajorIds?: string[];
   unlocksSkillIds?: string[];
   dueDate?: string;
   createdAt: string;
