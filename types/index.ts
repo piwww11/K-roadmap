@@ -91,6 +91,22 @@ export interface JournalEntry {
   createdAt: string;
 }
 
+export interface ExperimentReflection {
+  interest: number;
+  energy: number;
+  difficulty: number;
+  wouldDoAgain: boolean;
+  notes: string;
+  createdAt: string;
+}
+
+export interface ExperimentAttempt {
+  id: string;
+  startedAt?: string;
+  completedAt?: string;
+  reflection?: ExperimentReflection;
+}
+
 export interface Experiment {
   id: string;
   title: string;
@@ -102,15 +118,7 @@ export interface Experiment {
   startedAt?: string;
   completedAt?: string;
   reflection?: ExperimentReflection;
-}
-
-export interface ExperimentReflection {
-  interest: number;
-  energy: number;
-  difficulty: number;
-  wouldDoAgain: boolean;
-  notes: string;
-  createdAt: string;
+  attempts: ExperimentAttempt[];
 }
 
 export interface BudgetItem { id: string; name: string; amount: number; category: BudgetCategory; dueDate?: string; notes?: string; }
