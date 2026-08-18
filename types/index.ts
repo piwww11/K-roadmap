@@ -152,6 +152,14 @@ export interface MajorDecisionAnalysis {
   totalExplorationTasks: number;
   completedExperiments: number;
   totalExperiments: number;
+  reflectedAttempts: number;
+  totalExperimentAttempts: number;
+  averageReflectionInterest: number;
+  averageReflectionEnergy: number;
+  averageReflectionDifficulty: number;
+  wouldDoAgainRate: number;
+  reflectionRepeatRate: number;
+  reflectionInterestTrend: 'rising' | 'stable' | 'falling' | 'insufficient-data';
 }
 
 export interface MajorDecisionResult {
