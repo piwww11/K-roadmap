@@ -10,12 +10,14 @@ import {
   FileText,
   Wallet,
   FlaskConical,
+  GitCompare,
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Roadmap', href: '/roadmap', icon: Map },
   { name: 'Majors', href: '/majors', icon: GraduationCap },
+  { name: 'Comparison', href: '/majors/comparison', icon: GitCompare },
   { name: 'Experiments', href: '/experiments', icon: FlaskConical },
   { name: 'Skills', href: '/skills', icon: Brain },
   { name: 'Documents', href: '/documents', icon: FileText },

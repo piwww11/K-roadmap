@@ -160,6 +160,10 @@ export interface MajorDecisionAnalysis {
   wouldDoAgainRate?: number;
   reflectionRepeatRate?: number;
   reflectionInterestTrend?: 'rising' | 'stable' | 'falling' | 'insufficient-data';
+  decisionScore?: number;
+  evidenceScore?: number;
+  adaptiveScore?: number;
+  evidenceMaturity?: number;
 }
 
 export interface MajorDecisionResult {
