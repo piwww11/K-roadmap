@@ -46,15 +46,16 @@ export function analyzeReflections(experiments: Experiment[]): ReflectionAnalysi
   const last = interests[interests.length - 1];
   const delta = last - first;
   const interestTrend = interests.length < 2 ? 'insufficient-data' : delta >= 0.7 ? 'rising' : delta <= -0.7 ? 'falling' : 'stable';
+  const averageInterestScore = average(interests);
 
-  if (averageInterest(interests) >= 4) insights.push({ id: 'high-interest', tone: 'positive', title: 'Strong enjoyment signal', detail: `Your average interest across reflected attempts is ${averageInterest(interests)}/5.` });
+  if (averageInterestScore >= 4) insights.push({ id: 'high-interest', tone: 'positive', title: 'Strong enjoyment signal', detail: `Your average interest across reflected attempts is ${averageInterestScore}/5.` });
   if (interestTrend === 'rising') insights.push({ id: 'interest-rising', tone: 'positive', title: 'Interest is trending upward', detail: `Your recorded interest moved from ${first}/5 to ${last}/5 across the reflection sequence.` });
   if (interestTrend === 'falling') insights.push({ id: 'interest-falling', tone: 'caution', title: 'Interest is trending downward', detail: `Your recorded interest moved from ${first}/5 to ${last}/5. Treat this as a signal to investigate, not a final verdict.` });
   if (average(difficulties) >= 4 && average(energies) >= 3) insights.push({ id: 'productive-challenge', tone: 'positive', title: 'Difficulty may be productive', detail: `You report high difficulty (${average(difficulties)}/5) while maintaining energy (${average(energies)}/5).` });
   if (repeated.length) insights.push({ id: 'repeat-behavior', tone: 'positive', title: 'You are returning to experiments', detail: `${repeated.length} experiment${repeated.length === 1 ? '' : 's'} has been repeated, creating stronger evidence than a single reflection.` });
   if (!insights.length) insights.push({ id: 'early-signal', tone: 'neutral', title: 'Early evidence is still forming', detail: 'Keep reflecting consistently; patterns become more trustworthy as the history grows.' });
 
-  return { attempts: experiments.reduce((sum, experiment) => sum + Math.max(experiment.attempts?.length ?? 0, experiment.reflection ? 1 : 0), 0), reflectedAttempts: reflections.length, averageInterest: average(interests), averageEnergy: average(energies), averageDifficulty: average(difficulties), repeatRate: completed.length ? Math.round((repeated.length / completed.length) * 100) : 0, interestTrend, insights };
+  return { attempts: experiments.reduce((sum, experiment) => sum + Math.max(experiment.attempts?.length ?? 0, experiment.reflection ? 1 : 0), 0), reflectedAttempts: reflections.length, averageInterest: averageInterestScore, averageEnergy: average(energies), averageDifficulty: average(difficulties), repeatRate: completed.length ? Math.round((repeated.length / completed.length) * 100) : 0, interestTrend, insights };
 }
 
 export function analyzeExperimentReflection(experiment: Experiment): ReflectionAnalysis {
