@@ -26,9 +26,7 @@ export interface AdaptiveDashboardPlan {
 }
 
 function allTasks(phases: Phase[]): Task[] {
-  return phases.flatMap((phase) =>
-    phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks))
-  );
+  return phases.flatMap((phase) => phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks)));
 }
 
 function taskIsRelevant(task: Task, majorId: string): boolean {
@@ -47,15 +45,9 @@ function round(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-/**
- * Builds a second score from observed behavior rather than the questionnaire.
- * The questionnaire remains useful as a prior, but real exploration gradually
- * gets more authority as evidence accumulates.
- */
-function buildAdaptiveEvidence(analysis: MajorDecisionAnalysis, major?: Major): AdaptiveEvidence {
-  const taskCoverage = analysis.totalExplorationTasks > 0
-    ? analysis.completedExplorationTasks / analysis.totalExplorationTasks
-    : 0;
+/** Builds the shared evidence-aware score used by both Dashboard and comparison views. */
+export function buildAdaptiveEvidence(analysis: MajorDecisionAnalysis, major?: Major): AdaptiveEvidence {
+  const taskCoverage = analysis.totalExplorationTasks > 0 ? analysis.completedExplorationTasks / analysis.totalExplorationTasks : 0;
   const taskEvidence = clamp(taskCoverage * 100);
 
   const attempts = analysis.totalExperimentAttempts ?? 0;
@@ -65,127 +57,55 @@ function buildAdaptiveEvidence(analysis: MajorDecisionAnalysis, major?: Major): 
   const experimentCoverage = totalExperiments > 0 ? completedExperiments / totalExperiments : 0;
   const reflectionCoverage = attempts > 0 ? reflectedAttempts / attempts : 0;
   const volume = clamp((attempts * 8) + (completedExperiments * 12));
-  const experimentEvidence = clamp(
-    volume * 0.35 + experimentCoverage * 35 + reflectionCoverage * 30
-  );
+  const experimentEvidence = clamp(volume * 0.35 + experimentCoverage * 35 + reflectionCoverage * 30);
 
   const hasReflection = reflectedAttempts > 0;
   const interest = (analysis.averageReflectionInterest ?? 0) / 5;
   const energy = (analysis.averageReflectionEnergy ?? 0) / 5;
   const willingness = (analysis.wouldDoAgainRate ?? 0) / 100;
   const repeat = (analysis.reflectionRepeatRate ?? 0) / 100;
-  const trend = analysis.reflectionInterestTrend === 'rising'
-    ? 1
-    : analysis.reflectionInterestTrend === 'falling'
-      ? 0
-      : analysis.reflectionInterestTrend === 'stable'
-        ? 0.5
-        : 0;
-
-  const reflectionQuality = hasReflection
-    ? interest * 0.35 + energy * 0.2 + willingness * 0.25 + repeat * 0.1 + trend * 0.1
-    : 0;
+  const trend = analysis.reflectionInterestTrend === 'rising' ? 1 : analysis.reflectionInterestTrend === 'falling' ? 0 : analysis.reflectionInterestTrend === 'stable' ? 0.5 : 0;
+  const reflectionQuality = hasReflection ? interest * 0.35 + energy * 0.2 + willingness * 0.25 + repeat * 0.1 + trend * 0.1 : 0;
   const reflectionEvidence = clamp(reflectionQuality * 100);
-
   const confidenceEvidence = clamp((major?.confidenceScore ?? 0) * 10);
 
-  // Reflection is the strongest behavioral signal because it records what
-  // actually happened after the user tried the work.
-  const evidenceScore = round(
-    taskEvidence * 0.2 +
-    experimentEvidence * 0.2 +
-    reflectionEvidence * 0.4 +
-    confidenceEvidence * 0.2
-  );
-
-  // Maturity is deliberately based on breadth/depth of observed evidence.
-  // With no evidence, the questionnaire remains the dominant prior. As the
-  // user accumulates real experiences, observed evidence can become dominant.
-  const maturityUnits =
-    analysis.completedExplorationTasks +
-    completedExperiments +
-    reflectedAttempts;
+  const evidenceScore = round(taskEvidence * 0.2 + experimentEvidence * 0.2 + reflectionEvidence * 0.4 + confidenceEvidence * 0.2);
+  const maturityUnits = analysis.completedExplorationTasks + completedExperiments + reflectedAttempts;
   const evidenceMaturity = round(clamp(maturityUnits / 6, 0, 1));
-
   const decisionWeight = 0.65 - (0.30 * evidenceMaturity);
   const evidenceWeight = 1 - decisionWeight;
   const decisionScore = analysis.score;
   const adaptiveScore = round(decisionScore * decisionWeight + evidenceScore * evidenceWeight);
 
-  return {
-    decisionScore,
-    evidenceScore,
-    adaptiveScore,
-    evidenceMaturity,
-    taskEvidence: round(taskEvidence),
-    experimentEvidence: round(experimentEvidence),
-    reflectionEvidence: round(reflectionEvidence),
-    confidenceEvidence: round(confidenceEvidence),
-  };
+  return { decisionScore, evidenceScore, adaptiveScore, evidenceMaturity, taskEvidence: round(taskEvidence), experimentEvidence: round(experimentEvidence), reflectionEvidence: round(reflectionEvidence), confidenceEvidence: round(confidenceEvidence) };
 }
 
 function rankAnalyses(analyses: MajorDecisionAnalysis[], majors: Major[]): Array<MajorDecisionAnalysis & { adaptive: AdaptiveEvidence }> {
-  return analyses
-    .map((analysis) => ({
-      ...analysis,
-      adaptive: buildAdaptiveEvidence(analysis, majors.find((major) => major.id === analysis.majorId)),
-    }))
-    .sort((a, b) => b.adaptive.adaptiveScore - a.adaptive.adaptiveScore);
+  return analyses.map((analysis) => ({ ...analysis, adaptive: buildAdaptiveEvidence(analysis, majors.find((major) => major.id === analysis.majorId)) })).sort((a, b) => b.adaptive.adaptiveScore - a.adaptive.adaptiveScore);
 }
 
-export function buildAdaptiveDashboardPlan({
-  analyses,
-  majors,
-  phases,
-  experiments,
-}: {
-  analyses: MajorDecisionAnalysis[];
-  majors: Major[];
-  phases: Phase[];
-  experiments: Experiment[];
-}): AdaptiveDashboardPlan {
+export function buildAdaptiveDashboardPlan({ analyses, majors, phases, experiments }: { analyses: MajorDecisionAnalysis[]; majors: Major[]; phases: Phase[]; experiments: Experiment[] }): AdaptiveDashboardPlan {
   const tasks = allTasks(phases);
   const ranked = rankAnalyses(analyses, majors);
   const leader = ranked[0];
 
   if (!leader) {
     const fallback = [...majors].sort((a, b) => b.interestScore - a.interestScore)[0];
-    return {
-      focusMajorId: fallback?.id,
-      focusMajorName: fallback?.name,
-      focusScore: fallback ? fallback.interestScore * 10 : undefined,
-      missionTask: tasks.find((task) => task.status !== 'Completed'),
-      priority: 'medium',
-      title: fallback ? `Explore ${fallback.name}` : 'Take the next roadmap step',
-      reason: 'There is not enough decision or real-world evidence yet, so the dashboard keeps you moving without treating the current direction as final.',
-      signals: fallback ? ['No decision analysis is available yet; current interest is being used only as a temporary fallback.'] : ['No major evidence is available yet.'],
-    };
+    return { focusMajorId: fallback?.id, focusMajorName: fallback?.name, focusScore: fallback ? fallback.interestScore * 10 : undefined, missionTask: tasks.find((task) => task.status !== 'Completed'), priority: 'medium', title: fallback ? `Explore ${fallback.name}` : 'Take the next roadmap step', reason: 'There is not enough decision or real-world evidence yet, so the dashboard keeps you moving without treating the current direction as final.', signals: fallback ? ['No decision analysis is available yet; current interest is being used only as a temporary fallback.'] : ['No major evidence is available yet.'] };
   }
 
   const major = majors.find((candidate) => candidate.id === leader.majorId);
   const evidence = leader.adaptive;
   const runnerUp = ranked[1];
   const relevantExperiments = experiments.filter((experiment) => experiment.majorId === leader.majorId);
-  const reflectedExperiments = relevantExperiments.filter((experiment) =>
-    (experiment.attempts ?? []).some((attempt) => Boolean(attempt.reflection)) || Boolean(experiment.reflection)
-  );
+  const reflectedExperiments = relevantExperiments.filter((experiment) => (experiment.attempts ?? []).some((attempt) => Boolean(attempt.reflection)) || Boolean(experiment.reflection));
   const relevantTask = firstRelevantIncompleteTask(tasks, leader.majorId);
   const activeExperiment = relevantExperiments.find((experiment) => experiment.status === 'in-progress' || experiment.status === 'planned');
   const margin = runnerUp ? round(evidence.adaptiveScore - runnerUp.adaptive.adaptiveScore) : evidence.adaptiveScore;
-
-  const signals: string[] = [
-    `Initial decision signal: ${evidence.decisionScore}/100.`,
-    `Observed evidence signal: ${evidence.evidenceScore}/100.`,
-  ];
-
-  if (evidence.evidenceMaturity >= 0.5) {
-    signals.push(`Real-world evidence has ${Math.round(evidence.evidenceMaturity * 100)}% maturity and now carries more weight than the initial questionnaire.`);
-  } else if (evidence.evidenceMaturity > 0) {
-    signals.push(`Real-world evidence is still developing (${Math.round(evidence.evidenceMaturity * 100)}% maturity), so the initial decision remains an important prior.`);
-  } else {
-    signals.push('No meaningful real-world evidence exists yet, so the initial decision remains the main signal.');
-  }
-
+  const signals: string[] = [`Initial decision signal: ${evidence.decisionScore}/100.`, `Observed evidence signal: ${evidence.evidenceScore}/100.`];
+  if (evidence.evidenceMaturity >= 0.5) signals.push(`Real-world evidence has ${Math.round(evidence.evidenceMaturity * 100)}% maturity and now carries more weight than the initial questionnaire.`);
+  else if (evidence.evidenceMaturity > 0) signals.push(`Real-world evidence is still developing (${Math.round(evidence.evidenceMaturity * 100)}% maturity), so the initial decision remains an important prior.`);
+  else signals.push('No meaningful real-world evidence exists yet, so the initial decision remains the main signal.');
   if (evidence.taskEvidence > 0) signals.push(`Exploration completion contributes ${evidence.taskEvidence}/100 to observed evidence.`);
   if (evidence.experimentEvidence > 0) signals.push(`Experiment engagement contributes ${evidence.experimentEvidence}/100 to observed evidence.`);
   if (evidence.reflectionEvidence > 0) signals.push(`Reflection quality contributes ${evidence.reflectionEvidence}/100 to observed evidence.`);
@@ -215,15 +135,5 @@ export function buildAdaptiveDashboardPlan({
     missionTask = undefined;
   }
 
-  return {
-    focusMajorId: leader.majorId,
-    focusMajorName: major?.name,
-    focusScore: evidence.adaptiveScore,
-    evidence,
-    missionTask,
-    priority,
-    title,
-    reason,
-    signals,
-  };
+  return { focusMajorId: leader.majorId, focusMajorName: major?.name, focusScore: evidence.adaptiveScore, evidence, missionTask, priority, title, reason, signals };
 }
