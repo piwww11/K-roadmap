@@ -1,5 +1,5 @@
 import type { Experiment, Major, MajorDecisionAnalysis, MajorDecisionResponse, MajorDecisionResult, Phase } from '@/types';
-import { analyzeReflections, type ReflectionAnalysis } from './reflectionIntelligence';
+import { analyzeReflections } from '@/lib/reflectionIntelligence';
 
 const MAJOR_KEYWORDS: Record<string, string[]> = {
   m1: ['physics', 'fisika', 'mechanics', 'mechanika', 'quantum', 'kuantum', 'space', 'astronomy', 'astronomi', 'vectors', 'vektor', 'waves', 'gelombang', 'motion', 'gerak', 'experiment', 'eksperimen', 'mathematics', 'matematika'],
@@ -51,38 +51,14 @@ function experimentStats(experiments: Experiment[], majorId: string) {
     (experiment.attempts ?? []).some((attempt) => Boolean(attempt.reflection)) || Boolean(experiment.reflection)
   );
   const attempts = relevant.reduce(
-    (count, experiment) => count + (experiment.attempts?.length ?? (experiment.reflection ? 1 : 0)),
+    (count, experiment) => count + (experiment.attempts?.filter((attempt) => attempt.reflection).length ?? (experiment.reflection ? 1 : 0)),
     0
   );
   return {
-    relevant,
     completed: reflected.length,
     total: relevant.length,
     attempts,
   };
-}
-
-function reflectionSignal(analysis: ReflectionAnalysis): number {
-  if (analysis.reflectedAttempts === 0) return 0;
-
-  const interest = analysis.averageInterest / 5;
-  const energy = analysis.averageEnergy / 5;
-  const willingness = analysis.wouldDoAgainRate / 100;
-  const trend = analysis.interestTrend === 'rising'
-    ? 1
-    : analysis.interestTrend === 'falling'
-      ? 0
-      : 0.5;
-  const repeatBehavior = analysis.repeatRate / 100;
-
-  const quality =
-    interest * 0.4 +
-    energy * 0.2 +
-    willingness * 0.25 +
-    trend * 0.1 +
-    repeatBehavior * 0.05;
-
-  return Math.round(Math.min(10, Math.max(0, quality * 10)));
 }
 
 function levelFor(completedTasks: number, completedExperiments: number, totalEvidence: number): MajorDecisionAnalysis['evidenceLevel'] {
@@ -101,7 +77,8 @@ export function analyzeMajorDecision(
   const analyses = majors.map((major) => {
     const stats = taskStats(phases, major.id);
     const experiment = experimentStats(experiments, major.id);
-    const reflection = analyzeReflections(experiment.relevant);
+    const relevantExperiments = experiments.filter((candidate) => candidate.majorId === major.id);
+    const reflection = analyzeReflections(relevantExperiments);
     const keywordHitsTotal = QUESTIONS.reduce((sum, question) => sum + keywordHits(response[question], major.id), 0);
     const conceptHitsTotal = QUESTIONS.reduce((sum, question) => sum + conceptHits(response[question], major.id), 0);
 
@@ -109,7 +86,23 @@ export function analyzeMajorDecision(
     const interestSignal = Math.round(Math.min(20, major.interestScore * 2));
     const confidenceSignal = Math.round(Math.min(15, major.confidenceScore * 1.5));
     const taskSignal = stats.total === 0 ? 0 : Math.round((stats.completed / stats.total) * 15);
-    const experimentSignal = reflectionSignal(reflection);
+
+    // Experiment evidence remains bounded at 10 points. Coverage is the main
+    // signal; reflection quality adds a small, explainable adjustment using all
+    // reflected attempts, including interest, energy, and willingness to repeat.
+    const experimentCoverageSignal = experiment.total === 0
+      ? 0
+      : Math.round((experiment.completed / experiment.total) * 8);
+    const reflectionQualitySignal = reflection.reflectedAttempts === 0
+      ? 0
+      : Math.round(
+          (
+            (reflection.averageInterest / 5) * 0.5 +
+            (reflection.averageEnergy / 5) * 0.2 +
+            (reflection.wouldDoAgainRate / 100) * 0.3
+          ) * 2
+        );
+    const experimentSignal = Math.min(10, experimentCoverageSignal + reflectionQualitySignal);
     const explorationSignal = Math.min(25, taskSignal + experimentSignal);
     const score = Math.min(100, languageSignal + interestSignal + confidenceSignal + explorationSignal);
     const evidenceLevel = levelFor(stats.completed, experiment.completed, stats.total + experiment.total);
@@ -118,27 +111,27 @@ export function analyzeMajorDecision(
     if (keywordHitsTotal >= 2 || conceptHitsTotal > 0) strengths.push('Your decision answers contain recurring signals connected to this field.');
     if (major.interestScore >= 7) strengths.push('You already report strong interest in this major.');
     if (stats.completed > 0) strengths.push(`You have completed ${stats.completed} exploration task${stats.completed === 1 ? '' : 's'} in this area.`);
-    if (experiment.completed > 0) strengths.push(`You reflected on ${experiment.completed} experiment${experiment.completed === 1 ? '' : 's'} in this area across ${reflection.attempts} attempt${reflection.attempts === 1 ? '' : 's'}.`);
-    if (reflection.interestTrend === 'rising') strengths.push('Your reflected interest is trending upward across attempts.');
-    if (reflection.averageEnergy >= 3.5) strengths.push(`Your average energy across reflected attempts is ${reflection.averageEnergy}/5.`);
-    if (reflection.wouldDoAgainRate >= 67) strengths.push(`${reflection.wouldDoAgainRate}% of reflected attempts say you would do this kind of work again.`);
-    if (reflection.averageDifficulty >= 4 && reflection.averageEnergy >= 3) strengths.push('High difficulty is being sustained with meaningful energy, which may indicate a productive challenge.');
+    if (experiment.completed > 0) strengths.push(`You reflected on ${experiment.completed} experiment${experiment.completed === 1 ? '' : 's'} in this area across ${experiment.attempts} attempt${experiment.attempts === 1 ? '' : 's'}.`);
+    if (reflection.reflectedAttempts > 0 && reflection.averageInterest >= 4) strengths.push(`Reflections show strong average interest (${reflection.averageInterest}/5) across all reflected attempts.`);
+    if (reflection.reflectedAttempts > 0 && reflection.wouldDoAgainRate >= 67) strengths.push(`${reflection.wouldDoAgainRate}% of reflected attempts say you would willingly do similar work again.`);
+    if (reflection.reflectedAttempts > 1 && reflection.interestTrend === 'rising') strengths.push('Your reflection history shows interest rising across repeated attempts.');
+    if (reflection.reflectedAttempts > 0 && reflection.averageDifficulty >= 4 && reflection.averageEnergy >= 3) strengths.push('High difficulty is paired with sustained energy, suggesting a productive challenge rather than simple avoidance.');
 
     const uncertainties: string[] = [];
     if (stats.completed === 0 && experiment.completed === 0) uncertainties.push('There is not enough hands-on roadmap evidence yet.');
     if (major.confidenceScore < 5) uncertainties.push('Your current confidence is still relatively low.');
     if (keywordHitsTotal === 0 && conceptHitsTotal === 0) uncertainties.push('The latest decision answers do not contain a clear signal for this field.');
     if (experiment.completed > 0 && experiment.completed < experiment.total) uncertainties.push('You have started exploring this field but have not reflected on every experiment yet.');
-    if (reflection.interestTrend === 'falling') uncertainties.push(`Interest is trending downward across reflected attempts (${reflection.averageInterest}/5 average).`);
-    if (reflection.wouldDoAgainRate <= 33) uncertainties.push(`Only ${reflection.wouldDoAgainRate}% of reflected attempts say you would willingly do this kind of work again.`);
-    if (reflection.averageEnergy <= 2 && reflection.reflectedAttempts > 0) uncertainties.push(`Average energy is low at ${reflection.averageEnergy}/5 across reflected attempts.`);
+    if (reflection.reflectedAttempts > 0 && reflection.wouldDoAgainRate <= 33) uncertainties.push(`Only ${reflection.wouldDoAgainRate}% of reflected attempts indicate willingness to repeat this kind of work.`);
+    if (reflection.reflectedAttempts > 1 && reflection.interestTrend === 'falling') uncertainties.push('Interest is trending downward across the reflection history; investigate why before treating the field as a poor fit.');
 
     const recommendedNextSteps: string[] = [];
     if (experiment.total > experiment.completed) recommendedNextSteps.push('Run and reflect on another small experiment in this major.');
     if (stats.total > stats.completed) recommendedNextSteps.push('Complete another exploration task in this major.');
-    if (reflection.interestTrend === 'falling' || reflection.wouldDoAgainRate <= 33) recommendedNextSteps.push('Run one contrasting experiment to investigate what specifically changes your interest or willingness to repeat.');
     if (stats.completed === 0 && experiment.completed === 0) recommendedNextSteps.push('Run a small hands-on experiment before making a commitment.');
     if (major.confidenceScore < 5) recommendedNextSteps.push('Reflect on what specifically makes you uncertain about this field.');
+    if (reflection.reflectedAttempts > 0 && reflection.interestTrend === 'falling') recommendedNextSteps.push('Repeat a related experiment with a different approach to test whether the falling interest is stable.');
+    if (reflection.reflectedAttempts > 0 && reflection.wouldDoAgainRate <= 33) recommendedNextSteps.push('Write a short note about what made the experience less appealing before deciding what to explore next.');
     if (recommendedNextSteps.length === 0) recommendedNextSteps.push('Keep logging real experiences before treating this result as final.');
 
     return {
