@@ -1,4 +1,4 @@
-import type { Major, MajorDecisionAnalysis, MajorDecisionResponse, Phase, Experiment } from '@/types';
+import type { Major, MajorDecisionAnalysis, MajorDecisionResponse, Experiment, Phase } from '@/types';
 import { buildEvidenceDashboardModel, type EvidenceDashboardMajor } from './evidenceDashboard';
 
 export interface MajorComparisonEntry {
@@ -33,10 +33,6 @@ export interface MajorComparisonModel {
   generatedAt: string;
 }
 
-function clamp(value: number, min = 0, max = 100): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 function progress(completed: number, total: number): number {
   return total > 0 ? Math.round((completed / total) * 100) : 0;
 }
@@ -44,8 +40,6 @@ function progress(completed: number, total: number): number {
 function buildDimensionExplanation(entry: MajorComparisonEntry, leader: MajorComparisonEntry): string[] {
   const reasons: string[] = [];
   if (entry.adaptiveScore === leader.adaptiveScore) reasons.push('Adaptive evidence is currently tied.');
-  else if (entry.adaptiveScore === leader.adaptiveScore) reasons.push('Adaptive evidence is currently tied.');
-
   if (entry.interest > leader.interest) reasons.push(`Interest is higher (${entry.interest}/10 vs ${leader.interest}/10).`);
   if (entry.confidence > leader.confidence) reasons.push(`Confidence is higher (${entry.confidence}/10 vs ${leader.confidence}/10).`);
   if (entry.evidenceScore > leader.evidenceScore) reasons.push(`Observed evidence is stronger (${entry.evidenceScore}/100 vs ${leader.evidenceScore}/100).`);
@@ -56,7 +50,7 @@ function buildDimensionExplanation(entry: MajorComparisonEntry, leader: MajorCom
   return reasons.slice(0, 3);
 }
 
-function buildComparisonExplanation(entries: MajorComparisonEntry[], leader?: MajorComparisonEntry, runnerUp?: MajorComparisonEntry): string {
+function buildComparisonExplanation(leader?: MajorComparisonEntry, runnerUp?: MajorComparisonEntry): string {
   if (!leader) return 'Complete a Major Decision questionnaire to generate a comparison.';
   if (!runnerUp) return `${leader.name} is the only major with an available analysis. Add or compare more majors as the roadmap grows.`;
   const gap = leader.adaptiveScore - runnerUp.adaptiveScore;
@@ -79,15 +73,7 @@ export function buildMajorComparisonModel({
   decision: MajorDecisionResponse;
   analyses: MajorDecisionAnalysis[];
 }): MajorComparisonModel {
-  const evidence = buildEvidenceDashboardModel({
-    majors,
-    phases,
-    experiments,
-    decisions: [decision],
-    analyses,
-  });
-
-  const byId = new Map(evidence.majors.map((item) => [item.majorId, item]));
+  const evidence = buildEvidenceDashboardModel({ majors, phases, experiments, decisions: [decision], analyses });
   const sorted = [...evidence.majors].sort((a, b) => b.adaptive.adaptiveScore - a.adaptive.adaptiveScore);
   const leader = sorted[0];
   const runnerUp = sorted[1];
@@ -95,7 +81,7 @@ export function buildMajorComparisonModel({
   const entries = sorted.map((item, index) => {
     const major = majors.find((candidate) => candidate.id === item.majorId);
     const explorationProgress = progress(item.taskProgress.completed, item.taskProgress.total);
-    const entry: MajorComparisonEntry = {
+    return {
       majorId: item.majorId,
       name: item.name,
       university: major?.university ?? '',
@@ -115,35 +101,25 @@ export function buildMajorComparisonModel({
       nextEvidenceNeeded: item.nextEvidenceNeeded,
       adaptiveGap: leader ? Math.round((leader.adaptive.adaptiveScore - item.adaptive.adaptiveScore) * 10) / 10 : 0,
       rank: index + 1,
-    };
-    return entry;
+    } satisfies MajorComparisonEntry;
   });
 
   const leaderEntry = entries.find((entry) => entry.majorId === leader?.majorId);
   const runnerUpEntry = entries.find((entry) => entry.majorId === runnerUp?.majorId);
-  const headline = leaderEntry ? `${leaderEntry.name} currently leads the comparison` : 'No comparison leader yet';
-  const explanation = buildComparisonExplanation(entries, leaderEntry, runnerUpEntry);
-
-  // Keep this lookup explicit so the model remains deterministic if the evidence
-  // dashboard later grows optional entries or changes ordering.
-  void byId;
 
   return {
     entries,
     leaderId: leaderEntry?.majorId,
     runnerUpId: runnerUpEntry?.majorId,
     leaderGap: leaderEntry && runnerUpEntry ? Math.round((leaderEntry.adaptiveScore - runnerUpEntry.adaptiveScore) * 10) / 10 : 0,
-    headline,
-    explanation,
+    headline: leaderEntry ? `${leaderEntry.name} currently leads the comparison` : 'No comparison leader yet',
+    explanation: buildComparisonExplanation(leaderEntry, runnerUpEntry),
     generatedAt: new Date().toISOString(),
   };
 }
 
 export function explainMajorAgainstLeader(entry: MajorComparisonEntry, leader: MajorComparisonEntry): string[] {
-  if (entry.majorId === leader.majorId) {
-    return ['This major is currently leading the adaptive comparison.', ...entry.strengths.slice(0, 2)];
-  }
-
+  if (entry.majorId === leader.majorId) return ['This major is currently leading the adaptive comparison.', ...entry.strengths.slice(0, 2)];
   const reasons = buildDimensionExplanation(entry, leader);
   if (entry.adaptiveGap > 0) reasons.unshift(`${entry.adaptiveGap} points behind the current leader on adaptive evidence.`);
   return reasons.slice(0, 4);
