@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useExperimentStore } from '@/store/experimentStore';
-import { analyzeMajorDecision } from '@/lib/majorDecisionEngine';
+import { analyzeMajorDecision } from '@/lib/majorDecisionEngineV2';
 
 const QUESTIONS = ['q1_most_curious','q2_willing_to_struggle','q3_enjoy_most','q4_math_feeling','q5_most_enjoyable_experiment','q6_voluntary_research','q7_without_name'] as const;
 const LABELS: Record<(typeof QUESTIONS)[number], string> = {
@@ -67,6 +67,26 @@ export default function MajorDecisionPage() {
                     <div><div className="flex items-center gap-3"><span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-400">#{index + 1}</span><h3 className="text-2xl font-bold text-white">{majorName(analysis.majorId)}</h3></div><p className="mt-2 text-sm text-slate-500">Evidence: {analysis.evidenceLevel} · Tasks: {analysis.completedExplorationTasks}/{analysis.totalExplorationTasks} · Experiments: {analysis.completedExperiments}/{analysis.totalExperiments}</p></div>
                     <div className="text-right"><div className="text-3xl font-bold text-white">{analysis.score}</div><div className="text-xs uppercase tracking-wider text-slate-500">/ 100</div></div>
                   </div>
+
+                  {analysis.reflectedAttempts > 0 && (
+                    <div className="mt-5 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Reflection evidence</p>
+                          <p className="mt-1 text-xs text-slate-500">{analysis.reflectedAttempts} reflected attempt{analysis.reflectedAttempts === 1 ? '' : 's'} across {analysis.totalExperimentAttempts} total attempt{analysis.totalExperimentAttempts === 1 ? '' : 's'}</p>
+                        </div>
+                        <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">Interest trend: {analysis.reflectionInterestTrend}</span>
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                        <div><p className="text-[11px] uppercase tracking-wider text-slate-500">Interest</p><p className="mt-1 text-sm font-semibold text-white">{analysis.averageReflectionInterest}/5</p></div>
+                        <div><p className="text-[11px] uppercase tracking-wider text-slate-500">Energy</p><p className="mt-1 text-sm font-semibold text-white">{analysis.averageReflectionEnergy}/5</p></div>
+                        <div><p className="text-[11px] uppercase tracking-wider text-slate-500">Difficulty</p><p className="mt-1 text-sm font-semibold text-white">{analysis.averageReflectionDifficulty}/5</p></div>
+                        <div><p className="text-[11px] uppercase tracking-wider text-slate-500">Would repeat</p><p className="mt-1 text-sm font-semibold text-white">{analysis.wouldDoAgainRate}%</p></div>
+                        <div><p className="text-[11px] uppercase tracking-wider text-slate-500">Repeated experiments</p><p className="mt-1 text-sm font-semibold text-white">{analysis.reflectionRepeatRate}%</p></div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="mt-6 grid gap-4 md:grid-cols-3">
                     <div className="rounded-xl bg-slate-950/70 p-4"><p className="mb-2 text-xs uppercase tracking-wider text-slate-500">Strengths</p>{analysis.strengths.length ? <ul className="space-y-2 text-sm text-slate-300">{analysis.strengths.map((item) => <li key={item}>✓ {item}</li>)}</ul> : <p className="text-sm text-slate-500">No strong signal yet.</p>}</div>
                     <div className="rounded-xl bg-slate-950/70 p-4"><p className="mb-2 text-xs uppercase tracking-wider text-slate-500">Uncertainties</p>{analysis.uncertainties.length ? <ul className="space-y-2 text-sm text-slate-300">{analysis.uncertainties.map((item) => <li key={item}>? {item}</li>)}</ul> : <p className="text-sm text-slate-500">No major uncertainty detected.</p>}</div>
