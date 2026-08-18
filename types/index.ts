@@ -8,32 +8,8 @@ export type JournalCategory = 'Physics' | 'BCS' | 'Life Science' | 'GKS' | 'Math
 export type MajorTrack = 'physics' | 'bcs' | 'life-science';
 export type ExperimentStatus = 'planned' | 'in-progress' | 'completed' | 'skipped';
 
-export interface Major {
-  id: string;
-  name: string;
-  university: string;
-  interestScore: number;
-  baseConfidenceScore?: number;
-  confidenceScore: number;
-  themeColor: string;
-  icon: string;
-  description?: string;
-}
-
-export interface Task {
-  id: string;
-  title: string;
-  description?: string;
-  goalId: string;
-  status: TaskStatus;
-  category: string;
-  majorReward?: { majorId: string; confidenceAmount: number };
-  explorationMajorIds?: string[];
-  unlocksSkillIds?: string[];
-  dueDate?: string;
-  createdAt: string;
-}
-
+export interface Major { id: string; name: string; university: string; interestScore: number; baseConfidenceScore?: number; confidenceScore: number; themeColor: string; icon: string; description?: string; }
+export interface Task { id: string; title: string; description?: string; goalId: string; status: TaskStatus; category: string; majorReward?: { majorId: string; confidenceAmount: number }; explorationMajorIds?: string[]; unlocksSkillIds?: string[]; dueDate?: string; createdAt: string; }
 export interface Goal { id: string; title: string; description?: string; monthId: string; tasks: Task[]; status: TaskStatus; progress: number; category?: string; }
 export interface Month { id: string; name: string; year: number; phaseId: string; goals: Goal[]; startDate: string; endDate: string; }
 export interface Phase { id: string; number: number; title: string; subtitle: string; description: string; months: Month[]; startDate: string; endDate: string; status: 'Not Started' | 'In Progress' | 'Completed'; }
@@ -44,8 +20,7 @@ export interface ExperimentAttempt { id: string; startedAt?: string; completedAt
 export interface Experiment { id: string; title: string; description: string; majorId: string; estimatedMinutes: number; status: ExperimentStatus; createdAt: string; startedAt?: string; completedAt?: string; reflection?: ExperimentReflection; attempts: ExperimentAttempt[]; }
 
 export interface BudgetItem { id: string; name: string; amount: number; category: BudgetCategory; dueDate?: string; notes?: string; }
-export interface BudgetSaving { id: string; amount: number; date: string; note?: string; }
-export interface Budget { items: BudgetItem[]; targetAmount: number; currentSavings: number; savings: BudgetSaving[]; }
+export interface Budget { items: BudgetItem[]; targetAmount: number; currentSavings: number; }
 export interface DocumentItem { id: string; name: string; description: string; status: DocumentStatus; category: string; dueDate?: string; notes?: string; reference?: string; }
 export interface Achievement { id: string; name: string; description: string; icon: string; unlockedAt?: string; rarity: 'common' | 'rare' | 'epic' | 'legendary'; }
 
@@ -61,7 +36,7 @@ export interface JourneyState {
   majors: Major[]; reorderMajors: (oldIndex: number, newIndex: number) => void; updateMajorScore: (majorId: string, type: 'interest' | 'confidence', score: number) => void; getMajorConfidenceFromTasks: (majorId: string) => number;
   skills: Skill[]; updateSkillStatus: (skillId: string, status: SkillStatus) => void;
   journalEntries: JournalEntry[]; addJournalEntry: (entry: Omit<JournalEntry, 'id' | 'createdAt'>) => void; updateJournalEntry: (entryId: string, updates: Partial<JournalEntry>) => void; deleteJournalEntry: (entryId: string) => void; getJournalByCategory: (category: JournalCategory) => JournalEntry[];
-  budget: Budget; addBudgetItem: (item: BudgetItem) => void; removeBudgetItem: (itemId: string) => void; updateBudgetItem: (itemId: string, updates: Partial<BudgetItem>) => void; setBudgetTarget: (amount: number) => void; setCurrentSavings: (amount: number) => void; addSaving: (saving: Omit<BudgetSaving, 'id'>) => void; removeSaving: (savingId: string) => void;
+  budget: Budget; addBudgetItem: (item: BudgetItem) => void; removeBudgetItem: (itemId: string) => void; updateBudgetItem: (itemId: string, updates: Partial<BudgetItem>) => void; setBudgetTarget: (amount: number) => void; setCurrentSavings: (amount: number) => void;
   documents: DocumentItem[]; updateDocumentStatus: (documentId: string, status: DocumentStatus) => void; addDocument: (doc: Omit<DocumentItem, 'id'>) => void; deleteDocument: (documentId: string) => void;
   achievements: Achievement[]; unlockAchievement: (achievementId: string) => void; majorDecisions: MajorDecisionResponse[]; addMajorDecisionResponse: (response: MajorDecisionResponse) => void;
   getOverallProgress: () => number; getPhaseProgress: (phaseId: string) => number; getCompletedTaskCount: () => number; getTotalTaskCount: () => number; getCurrentPhase: () => Phase | undefined; getNextTask: () => Task | undefined; exportData: () => string; importData: (jsonString: string) => boolean; resetData: () => void;
