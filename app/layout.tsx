@@ -28,7 +28,7 @@ export default function RootLayout({
     >
       <body suppressHydrationWarning className="min-h-full bg-slate-950 text-slate-100">
         <Sidebar />
-        <main className="min-h-screen pl-64">
+        <main className="min-h-screen pl-0 pt-[4.5rem] md:pl-64 md:pt-0">
           {children}
         </main>
       </body>
