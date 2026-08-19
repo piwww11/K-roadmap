@@ -44,99 +44,46 @@ export const useExperimentStore = create<ExperimentState>()(
   persist(
     (set) => ({
       experiments: INITIAL_EXPERIMENTS,
-
-      addExperiment: (experiment) =>
-        set((state) => ({
-          experiments: [
-            ...state.experiments,
-            {
-              ...experiment,
-              id: `experiment-${Date.now()}`,
-              createdAt: new Date().toISOString(),
-              attempts: [],
-            },
-          ],
-        })),
-
-      startExperiment: (experimentId) =>
-        set((state) => ({
-          experiments: state.experiments.map((experiment) => {
-            if (experiment.id !== experimentId) return experiment;
-            const attempt = createAttempt();
-            return {
-              ...experiment,
-              status: 'in-progress',
-              startedAt: attempt.startedAt,
-              completedAt: undefined,
-              reflection: undefined,
-              attempts: [...(experiment.attempts ?? []), attempt],
-            };
-          }),
-        })),
-
-      updateExperiment: (experimentId, updates) =>
-        set((state) => ({
-          experiments: state.experiments.map((experiment) =>
-            experiment.id === experimentId
-              ? { ...experiment, ...updates }
-              : experiment
-          ),
-        })),
-
-      deleteExperiment: (experimentId) =>
-        set((state) => ({
-          experiments: state.experiments.filter(
-            (experiment) => experiment.id !== experimentId
-          ),
-        })),
-
-      saveReflection: (experimentId, reflection) =>
-        set((state) => ({
-          experiments: state.experiments.map((experiment) => {
-            if (experiment.id !== experimentId) return experiment;
-            const attempts = [...(experiment.attempts ?? [])];
-            const index = attempts.length - 1;
-            const now = new Date().toISOString();
-
-            if (index < 0) {
-              const attempt: ExperimentAttempt = {
-                ...createAttempt(),
-                completedAt: now,
-                reflection: { ...reflection, createdAt: now },
-              };
-              attempts.push(attempt);
-            } else {
-              attempts[index] = {
-                ...attempts[index],
-                completedAt: now,
-                reflection: { ...reflection, createdAt: now },
-              };
-            }
-
-            const latest = attempts[attempts.length - 1];
-            return {
-              ...experiment,
-              status: 'completed',
-              startedAt: latest.startedAt,
-              completedAt: latest.completedAt,
-              reflection: latest.reflection,
-              attempts,
-            };
-          }),
-        })),
-
+      addExperiment: (experiment) => set((state) => ({
+        experiments: [...state.experiments, { ...experiment, id: `experiment-${Date.now()}`, createdAt: new Date().toISOString(), attempts: [] }],
+      })),
+      startExperiment: (experimentId) => set((state) => ({
+        experiments: state.experiments.map((experiment) => {
+          if (experiment.id !== experimentId) return experiment;
+          const attempt = createAttempt();
+          return { ...experiment, status: 'in-progress', startedAt: attempt.startedAt, completedAt: undefined, reflection: undefined, attempts: [...(experiment.attempts ?? []), attempt] };
+        }),
+      })),
+      updateExperiment: (experimentId, updates) => set((state) => ({
+        experiments: state.experiments.map((experiment) => experiment.id === experimentId ? { ...experiment, ...updates } : experiment),
+      })),
+      deleteExperiment: (experimentId) => set((state) => ({
+        experiments: state.experiments.filter((experiment) => experiment.id !== experimentId),
+      })),
+      saveReflection: (experimentId, reflection) => set((state) => ({
+        experiments: state.experiments.map((experiment) => {
+          if (experiment.id !== experimentId) return experiment;
+          const attempts = [...(experiment.attempts ?? [])];
+          const index = attempts.length - 1;
+          const now = new Date().toISOString();
+          if (index < 0) {
+            attempts.push({ ...createAttempt(), completedAt: now, reflection: { ...reflection, createdAt: now } });
+          } else {
+            attempts[index] = { ...attempts[index], completedAt: now, reflection: { ...reflection, createdAt: now } };
+          }
+          const latest = attempts[attempts.length - 1];
+          return { ...experiment, status: 'completed', startedAt: latest.startedAt, completedAt: latest.completedAt, reflection: latest.reflection, attempts };
+        }),
+      })),
       resetExperiments: () => set({ experiments: INITIAL_EXPERIMENTS }),
     }),
     {
       name: 'k-roadmap-experiments-v1',
-      version: 2,
+      version: 3,
       migrate: (persistedState) => {
         if (!persistedState || typeof persistedState !== 'object') return persistedState as never;
         const state = persistedState as { experiments?: Experiment[] };
-        return {
-          ...persistedState,
-          experiments: normalizeExperiments(state.experiments ?? INITIAL_EXPERIMENTS),
-        };
+        return { ...persistedState, experiments: normalizeExperiments(state.experiments ?? INITIAL_EXPERIMENTS) };
       },
     }
   )
