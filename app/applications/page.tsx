@@ -21,8 +21,7 @@ function daysUntil(deadline?: string) {
   const target = new Date(`${deadline}T00:00:00`);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const diff = Math.ceil((target.getTime() - today.getTime()) / 86400000);
-  return diff;
+  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
 }
 
 function statusTone(status: ApplicationStatus) {
@@ -30,6 +29,50 @@ function statusTone(status: ApplicationStatus) {
   if (status === 'rejected' || status === 'withdrawn') return 'text-rose-300 bg-rose-500/10';
   if (status === 'submitted' || status === 'interview') return 'text-sky-300 bg-sky-500/10';
   return 'text-amber-300 bg-amber-500/10';
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const YEARS = Array.from({ length: 11 }, (_, index) => new Date().getFullYear() + index);
+
+function parseDeadline(deadline?: string) {
+  if (!deadline) return { day: '', month: '', year: '' };
+  const [year, month, day] = deadline.split('-');
+  return { day: day || '', month: month ? String(Number(month)) : '', year: year || '' };
+}
+
+function buildDeadline(year: string, month: string, day: string) {
+  if (!year || !month || !day) return undefined;
+  const numericDay = Number(day);
+  const numericMonth = Number(month);
+  const numericYear = Number(year);
+  const date = new Date(numericYear, numericMonth - 1, numericDay);
+  if (date.getFullYear() !== numericYear || date.getMonth() !== numericMonth - 1 || date.getDate() !== numericDay) return undefined;
+  return `${numericYear}-${String(numericMonth).padStart(2, '0')}-${String(numericDay).padStart(2, '0')}`;
+}
+
+function DeadlinePicker({ value, onChange, compact = false }: { value?: string; onChange: (value?: string) => void; compact?: boolean }) {
+  const parsed = parseDeadline(value);
+  const maxDays = parsed.year && parsed.month ? new Date(Number(parsed.year), Number(parsed.month), 0).getDate() : 31;
+  const days = Array.from({ length: maxDays }, (_, index) => index + 1);
+  const selectClass = compact ? 'rounded-lg border border-slate-800 bg-slate-950 px-2 py-1 text-xs text-slate-300 outline-none focus:border-indigo-500' : inputClass;
+  const update = (year: string, month: string, day: string) => onChange(buildDeadline(year, month, day));
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <select aria-label="Deadline month" className={selectClass} value={parsed.month} onChange={(e) => update(parsed.year, e.target.value, parsed.day)}>
+        <option value="">Month</option>
+        {MONTHS.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}
+      </select>
+      <select aria-label="Deadline day" className={selectClass} value={parsed.day} onChange={(e) => update(parsed.year, parsed.month, e.target.value)}>
+        <option value="">Day</option>
+        {days.map((day) => <option key={day} value={day}>{day}</option>)}
+      </select>
+      <select aria-label="Deadline year" className={selectClass} value={parsed.year} onChange={(e) => update(e.target.value, parsed.month, parsed.day)}>
+        <option value="">Year</option>
+        {YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
+      </select>
+    </div>
+  );
 }
 
 export default function ApplicationsPage() {
@@ -46,7 +89,7 @@ export default function ApplicationsPage() {
   const [country, setCountry] = useState('South Korea');
   const [program, setProgram] = useState('');
   const [majorId, setMajorId] = useState('');
-  const [deadline, setDeadline] = useState('');
+  const [deadline, setDeadline] = useState<string | undefined>();
   const [priority, setPriority] = useState<ApplicationPriority>('high');
   const [applicationUrl, setApplicationUrl] = useState('');
 
@@ -55,10 +98,7 @@ export default function ApplicationsPage() {
   const stats = useMemo(() => {
     if (!hydrated) return { total: 0, active: 0, urgent: 0, submitted: 0 };
     const active = applications.filter((item) => !['accepted', 'rejected', 'withdrawn'].includes(item.status));
-    const urgent = active.filter((item) => {
-      const days = daysUntil(item.deadline);
-      return days !== null && days >= 0 && days <= 30;
-    });
+    const urgent = active.filter((item) => { const days = daysUntil(item.deadline); return days !== null && days >= 0 && days <= 30; });
     const submitted = applications.filter((item) => ['submitted', 'interview'].includes(item.status));
     return { total: applications.length, active: active.length, urgent: urgent.length, submitted: submitted.length };
   }, [applications, hydrated]);
@@ -67,21 +107,11 @@ export default function ApplicationsPage() {
     event.preventDefault();
     if (!name.trim() || !organization.trim()) return;
     addApplication({
-      type,
-      name: name.trim(),
-      organization: organization.trim(),
-      country: country.trim() || 'Unknown',
-      program: program.trim() || undefined,
-      majorId: majorId || undefined,
-      status: 'researching',
-      priority,
-      deadline: deadline || undefined,
-      eligibility: 'unknown',
-      applicationUrl: applicationUrl.trim() || undefined,
-      requiredDocumentIds: [],
-      notes: undefined,
+      type, name: name.trim(), organization: organization.trim(), country: country.trim() || 'Unknown',
+      program: program.trim() || undefined, majorId: majorId || undefined, status: 'researching', priority,
+      deadline, eligibility: 'unknown', applicationUrl: applicationUrl.trim() || undefined, requiredDocumentIds: [], notes: undefined,
     });
-    setName(''); setOrganization(''); setProgram(''); setMajorId(''); setDeadline(''); setApplicationUrl('');
+    setName(''); setOrganization(''); setProgram(''); setMajorId(''); setDeadline(undefined); setApplicationUrl('');
   };
 
   if (!hydrated) return <main className="min-h-screen bg-slate-950 p-8 text-slate-100" />;
@@ -97,21 +127,12 @@ export default function ApplicationsPage() {
     <main className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
       <div className="mx-auto max-w-6xl">
         <header className="mb-8 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-widest text-indigo-400">K-ROADMAP / APPLICATIONS</p>
-            <h1 className="mt-2 text-4xl font-bold tracking-tight text-white">Application Tracker</h1>
-            <p className="mt-3 max-w-3xl text-slate-400">Keep universities and scholarships in one place, track their status, and preserve deadlines for the upcoming opportunity timeline.</p>
-          </div>
+          <div><p className="text-sm font-semibold uppercase tracking-widest text-indigo-400">K-ROADMAP / APPLICATIONS</p><h1 className="mt-2 text-4xl font-bold tracking-tight text-white">Application Tracker</h1><p className="mt-3 max-w-3xl text-slate-400">Keep universities and scholarships in one place, track their status, and preserve deadlines for the upcoming opportunity timeline.</p></div>
           <Link href="/readiness" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-900">Application Readiness →</Link>
         </header>
 
         <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {statCards.map(({ label, value, Icon }) => (
-            <div key={label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-              <div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-widest text-slate-500">{label}</span><Icon size={17} className="text-indigo-400" /></div>
-              <p className="mt-3 text-3xl font-bold text-white">{value}</p>
-            </div>
-          ))}
+          {statCards.map(({ label, value, Icon }) => <div key={label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-widest text-slate-500">{label}</span><Icon size={17} className="text-indigo-400" /></div><p className="mt-3 text-3xl font-bold text-white">{value}</p></div>)}
         </section>
 
         <section className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
@@ -123,7 +144,7 @@ export default function ApplicationsPage() {
             <input className={inputClass} placeholder="Country" value={country} onChange={(e) => setCountry(e.target.value)} />
             <input className={inputClass} placeholder="Program (optional)" value={program} onChange={(e) => setProgram(e.target.value)} />
             <select className={inputClass} value={majorId} onChange={(e) => setMajorId(e.target.value)}><option value="">Related major (optional)</option>{majors.map((major) => <option key={major.id} value={major.id}>{major.name}</option>)}</select>
-            <input className={inputClass} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+            <DeadlinePicker value={deadline} onChange={setDeadline} />
             <select className={inputClass} value={priority} onChange={(e) => setPriority(e.target.value as ApplicationPriority)}>{APPLICATION_PRIORITIES.map((item) => <option key={item.value} value={item.value}>{item.label} priority</option>)}</select>
             <input className={`${inputClass} lg:col-span-3`} placeholder="Official application URL (optional)" value={applicationUrl} onChange={(e) => setApplicationUrl(e.target.value)} />
             <button type="submit" className="flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-500"><Plus size={17} /> Add target</button>
@@ -131,9 +152,7 @@ export default function ApplicationsPage() {
         </section>
 
         <section className="space-y-4">
-          {applications.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-10 text-center"><GraduationCap className="mx-auto text-slate-600" size={32} /><h2 className="mt-4 font-bold text-white">No applications tracked yet</h2><p className="mt-2 text-sm text-slate-500">Add your first university or scholarship target above.</p></div>
-          ) : applications.map((application) => {
+          {applications.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-10 text-center"><GraduationCap className="mx-auto text-slate-600" size={32} /><h2 className="mt-4 font-bold text-white">No applications tracked yet</h2><p className="mt-2 text-sm text-slate-500">Add your first university or scholarship target above.</p></div> : applications.map((application) => {
             const days = daysUntil(application.deadline);
             const major = majors.find((item) => item.id === application.majorId);
             return <article key={application.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
@@ -141,7 +160,7 @@ export default function ApplicationsPage() {
                 <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-slate-800 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{application.type}</span><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusTone(application.status)}`}>{APPLICATION_STATUSES.find((item) => item.value === application.status)?.label}</span><span className="text-xs text-slate-600">{application.priority} priority</span></div><h2 className="mt-3 text-xl font-bold text-white">{application.name}</h2><p className="mt-1 text-sm text-slate-400">{application.organization} · {application.country}{major ? ` · ${major.name}` : ''}</p>{application.program && <p className="mt-1 text-sm text-slate-500">{application.program}</p>}</div>
                 <div className="flex shrink-0 flex-wrap gap-2"><select className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300" value={application.status} onChange={(e) => updateApplication(application.id, { status: e.target.value as ApplicationStatus })}>{APPLICATION_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{application.applicationUrl && <a href={application.applicationUrl} target="_blank" rel="noreferrer" className="rounded-xl border border-slate-800 p-2 text-slate-400 hover:text-white"><ExternalLink size={16} /></a>}<button type="button" onClick={() => removeApplication(application.id)} className="rounded-xl border border-slate-800 p-2 text-slate-500 hover:border-rose-500/30 hover:text-rose-300" aria-label={`Delete ${application.name}`}><Trash2 size={16} /></button></div>
               </div>
-              <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-slate-800 pt-4 text-sm"><label className="flex items-center gap-2 text-slate-400"><CalendarDays size={15} className="text-indigo-400" /><input aria-label={`${application.name} deadline`} className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1 text-sm text-slate-300" type="date" value={application.deadline ?? ''} onChange={(e) => updateApplication(application.id, { deadline: e.target.value || undefined })} /></label>{days !== null && <span className={days < 0 ? 'font-semibold text-rose-300' : days <= 30 ? 'font-semibold text-amber-300' : 'text-slate-500'}>{days < 0 ? `${Math.abs(days)} days overdue` : days === 0 ? 'Due today' : `${days} days left`}</span>}<span className="text-xs text-slate-600">Eligibility: {application.eligibility}</span></div>
+              <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-slate-800 pt-4 text-sm"><div className="flex items-center gap-2 text-slate-400"><CalendarDays size={15} className="text-indigo-400" /><DeadlinePicker compact value={application.deadline} onChange={(value) => updateApplication(application.id, { deadline: value })} /></div>{days !== null && <span className={days < 0 ? 'font-semibold text-rose-300' : days <= 30 ? 'font-semibold text-amber-300' : 'text-slate-500'}>{days < 0 ? `${Math.abs(days)} days overdue` : days === 0 ? 'Due today' : `${days} days left`}</span>}<span className="text-xs text-slate-600">Eligibility: {application.eligibility}</span></div>
             </article>;
           })}
         </section>
