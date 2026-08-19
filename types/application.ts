@@ -18,6 +18,7 @@ export interface ApplicationTarget {
   country: string;
   program?: string;
   majorId?: string;
+  majorLabel?: string;
   status: ApplicationStatus;
   priority: ApplicationPriority;
   deadline?: string;
