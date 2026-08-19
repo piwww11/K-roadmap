@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Map, GraduationCap, Brain, FileText, Wallet, FlaskConical, GitCompare, ShieldCheck, CalendarCheck } from 'lucide-react';
+import { LayoutDashboard, Map, GraduationCap, Brain, FileText, Wallet, FlaskConical, GitCompare, ShieldCheck, CalendarCheck, Compass } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Roadmap', href: '/roadmap', icon: Map },
+  { name: 'Adaptive Journey', href: '/adaptive-journey', icon: Compass },
   { name: 'Majors', href: '/majors', icon: GraduationCap },
   { name: 'Comparison', href: '/majors/comparison', icon: GitCompare },
   { name: 'Experiments', href: '/experiments', icon: FlaskConical },
