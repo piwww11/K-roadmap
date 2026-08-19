@@ -6,7 +6,7 @@ import { ArrowRight, Compass, FlaskConical, LockKeyhole, Target } from 'lucide-r
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useExperimentStore } from '@/store/experimentStore';
 import { analyzeMajorDecision } from '@/lib/majorDecisionEngine';
-import { buildAdaptiveJourneyModel, type AdaptiveJourneyModel } from '@/lib/adaptiveJourney';
+import { buildAdaptiveJourneyModel } from '@/lib/adaptiveJourney';
 
 export default function AdaptiveJourneyPage() {
   const phases = useJourneyStore((state) => state.phases);
@@ -21,7 +21,7 @@ export default function AdaptiveJourneyPage() {
   }, [decisions, experiments, majors, phases]);
 
   const focus = model.focusMajor;
-  const modes: AdaptiveJourneyModel['mode'][] = ['stabilize', 'explore', 'deepen', 'prepare'];
+  const modes = ['stabilize', 'explore', 'deepen', 'prepare'] as const;
 
   return (
     <main className="min-h-screen bg-slate-950 p-8 text-slate-100">
