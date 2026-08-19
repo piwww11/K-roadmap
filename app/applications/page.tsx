@@ -86,6 +86,13 @@ export default function ApplicationsPage() {
 
   if (!hydrated) return <main className="min-h-screen bg-slate-950 p-8 text-slate-100" />;
 
+  const statCards = [
+    { label: 'Targets', value: stats.total, Icon: GraduationCap },
+    { label: 'Active', value: stats.active, Icon: WalletCards },
+    { label: 'Due ≤ 30 days', value: stats.urgent, Icon: CalendarDays },
+    { label: 'Submitted / interview', value: stats.submitted, Icon: ExternalLink },
+  ];
+
   return (
     <main className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
       <div className="mx-auto max-w-6xl">
@@ -99,15 +106,12 @@ export default function ApplicationsPage() {
         </header>
 
         <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            ['Targets', stats.total, GraduationCap],
-            ['Active', stats.active, WalletCards],
-            ['Due ≤ 30 days', stats.urgent, CalendarDays],
-            ['Submitted / interview', stats.submitted, ExternalLink],
-          ].map(([label, value, Icon]) => {
-            const Component = Icon as typeof GraduationCap;
-            return <div key={String(label)} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-widest text-slate-500">{label}</span><Component size={17} className="text-indigo-400" /></div><p className="mt-3 text-3xl font-bold text-white">{value as number}</p></div>;
-          })}
+          {statCards.map(({ label, value, Icon }) => (
+            <div key={label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+              <div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-widest text-slate-500">{label}</span><Icon size={17} className="text-indigo-400" /></div>
+              <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+            </div>
+          ))}
         </section>
 
         <section className="mb-8 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
