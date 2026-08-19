@@ -1,5 +1,6 @@
-import type { Experiment, Major, MajorDecisionAnalysis, Phase, Task } from '@/types';
+import type { Experiment, Major, MajorDecisionAnalysis, MajorDecisionResponse, Phase, Task } from '@/types';
 import { analyzeReflections } from './reflectionIntelligence';
+import { buildMajorComparisonModel } from './majorComparison';
 
 export interface WeeklyIntelligenceReview {
   taskProgress: { completed: number; total: number; inProgress: number; percent: number };
@@ -17,11 +18,13 @@ export function buildWeeklyIntelligenceReview({
   phases,
   experiments,
   majors,
+  decision,
   analyses,
 }: {
   phases: Phase[];
   experiments: Experiment[];
   majors: Major[];
+  decision?: MajorDecisionResponse;
   analyses: MajorDecisionAnalysis[];
 }): WeeklyIntelligenceReview {
   const tasks = allTasks(phases);
@@ -30,23 +33,29 @@ export function buildWeeklyIntelligenceReview({
   const taskPercent = tasks.length ? Math.round((completedTasks / tasks.length) * 100) : 0;
 
   const reflectedExperiments = experiments.filter((experiment) =>
-    (experiment.attempts ?? []).some((attempt) => Boolean(attempt.reflection))
+    (experiment.attempts ?? []).some((attempt) => Boolean(attempt.reflection)) || Boolean(experiment.reflection)
   ).length;
   const reflections = analyzeReflections(experiments);
   const experimentPercent = experiments.length ? Math.round((reflectedExperiments / experiments.length) * 100) : 0;
 
-  const leaderAnalysis = [...analyses].sort(
-    (a, b) => (b.adaptiveScore ?? b.evidenceScore ?? b.score) - (a.adaptiveScore ?? a.evidenceScore ?? a.score)
-  )[0];
-  const leaderMajor = leaderAnalysis ? majors.find((major) => major.id === leaderAnalysis.majorId) : undefined;
-  const currentInterestLeader = leaderAnalysis && leaderMajor
+  // Comparison Studio is the single source of truth for the current leader and
+  // its adaptive/evidence/maturity values. Weekly Review must never maintain a
+  // second ranking implementation, otherwise the two intelligence surfaces can drift.
+  const comparison = decision
+    ? buildMajorComparisonModel({ majors, phases, experiments, decision, analyses })
+    : undefined;
+  const leaderEntry = comparison?.leaderId
+    ? comparison.entries.find((entry) => entry.majorId === comparison.leaderId)
+    : undefined;
+
+  const currentInterestLeader = leaderEntry
     ? {
-        majorId: leaderMajor.id,
-        name: leaderMajor.name,
-        icon: leaderMajor.icon,
-        adaptiveScore: Math.round((leaderAnalysis.adaptiveScore ?? leaderAnalysis.score) * 10) / 10,
-        evidenceScore: Math.round((leaderAnalysis.evidenceScore ?? 0) * 10) / 10,
-        maturity: leaderAnalysis.evidenceMaturity ?? 0,
+        majorId: leaderEntry.majorId,
+        name: leaderEntry.name,
+        icon: leaderEntry.icon,
+        adaptiveScore: leaderEntry.adaptiveScore,
+        evidenceScore: leaderEntry.evidenceScore,
+        maturity: leaderEntry.evidenceMaturity,
       }
     : undefined;
 
