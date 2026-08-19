@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Map, GraduationCap, Brain, FileText, Wallet, FlaskConical,
   ShieldCheck, CalendarCheck, Compass, BarChart3, ChevronDown, Scale, ClipboardList,
-  CalendarDays,
+  CalendarDays, Sparkles,
 } from 'lucide-react';
 
 const navigation = [
@@ -27,6 +27,7 @@ const majorNavigation = [
   { name: 'Decision', href: '/majors/decision', icon: GraduationCap },
   { name: 'Evidence', href: '/majors/evidence', icon: ShieldCheck },
   { name: 'Comparison', href: '/majors/comparison', icon: Scale },
+  { name: 'Decision Lab', href: '/majors/decision/experiments', icon: Sparkles },
 ];
 
 const baseLinkClass = 'group flex items-center gap-3 rounded-xl border px-3 py-3 text-sm font-medium transition-all duration-200';
