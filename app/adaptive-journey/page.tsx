@@ -21,6 +21,7 @@ export default function AdaptiveJourneyPage() {
   }, [decisions, experiments, majors, phases]);
 
   const focus = model.focusMajor;
+  const modes: AdaptiveJourneyModel['mode'][] = ['stabilize', 'explore', 'deepen', 'prepare'];
 
   return (
     <main className="min-h-screen bg-slate-950 p-8 text-slate-100">
@@ -37,7 +38,7 @@ export default function AdaptiveJourneyPage() {
             <h2 className="mt-2 text-2xl font-bold text-white">{model.modeLabel}</h2>
             <p className="mt-3 max-w-2xl leading-relaxed text-slate-400">{model.modeDescription}</p>
             <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold">
-              {['explore', 'deepen', 'prepare'].map((mode) => <span key={mode} className={`rounded-full border px-3 py-1.5 ${model.mode === mode ? 'border-indigo-400/40 bg-indigo-400/10 text-indigo-300' : 'border-slate-800 text-slate-600'}`}>{mode}</span>)}
+              {modes.map((mode) => <span key={mode} className={`rounded-full border px-3 py-1.5 ${model.mode === mode ? 'border-indigo-400/40 bg-indigo-400/10 text-indigo-300' : 'border-slate-800 text-slate-600'}`}>{mode}</span>)}
             </div>
           </article>
           <article className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
