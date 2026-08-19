@@ -23,26 +23,20 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
-/* ======================================================
-   K-ROADMAP UI POLISH
-   ====================================================== */
 
 html {
   scroll-behavior: smooth;
 }
 
-body {
-  overflow-x: hidden;
-}
-
-/* Selection */
 ::selection {
   background: rgba(99, 102, 241, 0.35);
   color: white;
 }
 
-/* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
 }
@@ -60,21 +54,51 @@ body {
   background: #334155;
 }
 
-/* Smooth interactive elements */
 button,
 a {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Remove default button focus appearance */
 button:focus-visible,
 a:focus-visible {
   outline: 2px solid rgba(129, 140, 248, 0.8);
   outline-offset: 3px;
 }
 
-/* Better text rendering */
-body {
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
+@media (max-width: 767px) {
+  body {
+    min-width: 0;
+  }
+
+  main {
+    width: 100%;
+    min-width: 0;
+    padding-left: 0 !important;
+    padding-top: 4.5rem !important;
+  }
+
+  /* Keep wide data blocks usable without making the entire page overflow. */
+  main table {
+    max-width: 100%;
+  }
+
+  main img,
+  main video,
+  main svg {
+    max-width: 100%;
+  }
+
+  /* Give cards and controls a little more room on narrow screens. */
+  main input,
+  main select,
+  main textarea,
+  main button {
+    max-width: 100%;
+  }
+}
+
+@media (min-width: 768px) {
+  main {
+    padding-left: 16rem;
+  }
 }
