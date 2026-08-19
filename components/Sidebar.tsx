@@ -2,16 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  LayoutDashboard,
-  Map,
-  GraduationCap,
-  Brain,
-  FileText,
-  Wallet,
-  FlaskConical,
-  GitCompare,
-} from 'lucide-react';
+import { LayoutDashboard, Map, GraduationCap, Brain, FileText, Wallet, FlaskConical, GitCompare, ShieldCheck } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -22,6 +13,7 @@ const navigation = [
   { name: 'Skills', href: '/skills', icon: Brain },
   { name: 'Documents', href: '/documents', icon: FileText },
   { name: 'Budget', href: '/budget', icon: Wallet },
+  { name: 'Readiness', href: '/readiness', icon: ShieldCheck },
 ];
 
 export default function Sidebar() {
