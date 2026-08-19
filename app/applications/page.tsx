@@ -86,6 +86,13 @@ export default function ApplicationsPage() {
 
   if (!hydrated) return <main className="min-h-screen bg-slate-950 p-8 text-slate-100" />;
 
+  const statCards = [
+    { label: 'Targets', value: stats.total, Icon: GraduationCap },
+    { label: 'Active', value: stats.active, Icon: WalletCards },
+    { label: 'Due ≤ 30 days', value: stats.urgent, Icon: CalendarDays },
+    { label: 'Submitted / interview', value: stats.submitted, Icon: ExternalLink },
+  ];
+
   return (
     <main className="min-h-screen bg-slate-950 px-6 py-10 text-slate-100">
       <div className="mx-auto max-w-6xl">
@@ -99,13 +106,11 @@ export default function ApplicationsPage() {
         </header>
 
         <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { label: 'Targets', value: stats.total, Icon: GraduationCap },
-            { label: 'Active', value: stats.active, Icon: WalletCards },
-            { label: 'Due ≤ 30 days', value: stats.urgent, Icon: CalendarDays },
-            { label: 'Submitted / interview', value: stats.submitted, Icon: ExternalLink },
-          ].map(({ label, value, Icon }) => (
-            <div key={label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-widest text-slate-500">{label}</span><Icon size={17} className="text-indigo-400" /></div><p className="mt-3 text-3xl font-bold text-white">{value}</p></div>
+          {statCards.map(({ label, value, Icon }) => (
+            <div key={label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+              <div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-widest text-slate-500">{label}</span><Icon size={17} className="text-indigo-400" /></div>
+              <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+            </div>
           ))}
         </section>
 
@@ -118,11 +123,7 @@ export default function ApplicationsPage() {
             <input className={inputClass} placeholder="Country" value={country} onChange={(e) => setCountry(e.target.value)} />
             <input className={inputClass} placeholder="Program (optional)" value={program} onChange={(e) => setProgram(e.target.value)} />
             <select className={inputClass} value={majorId} onChange={(e) => setMajorId(e.target.value)}><option value="">Related major (optional)</option>{majors.map((major) => <option key={major.id} value={major.id}>{major.name}</option>)}</select>
-            <div className="lg:col-span-2">
-              <label htmlFor="application-deadline" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">Application deadline</label>
-              <input id="application-deadline" className={inputClass} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} aria-describedby="deadline-help" />
-              <p id="deadline-help" className="mt-1.5 text-xs text-slate-600">Final date to submit this application. Use the calendar picker or enter the date in your browser's date format.</p>
-            </div>
+            <input className={inputClass} type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
             <select className={inputClass} value={priority} onChange={(e) => setPriority(e.target.value as ApplicationPriority)}>{APPLICATION_PRIORITIES.map((item) => <option key={item.value} value={item.value}>{item.label} priority</option>)}</select>
             <input className={`${inputClass} lg:col-span-3`} placeholder="Official application URL (optional)" value={applicationUrl} onChange={(e) => setApplicationUrl(e.target.value)} />
             <button type="submit" className="flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-500"><Plus size={17} /> Add target</button>
@@ -140,7 +141,7 @@ export default function ApplicationsPage() {
                 <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-slate-800 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{application.type}</span><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusTone(application.status)}`}>{APPLICATION_STATUSES.find((item) => item.value === application.status)?.label}</span><span className="text-xs text-slate-600">{application.priority} priority</span></div><h2 className="mt-3 text-xl font-bold text-white">{application.name}</h2><p className="mt-1 text-sm text-slate-400">{application.organization} · {application.country}{major ? ` · ${major.name}` : ''}</p>{application.program && <p className="mt-1 text-sm text-slate-500">{application.program}</p>}</div>
                 <div className="flex shrink-0 flex-wrap gap-2"><select className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300" value={application.status} onChange={(e) => updateApplication(application.id, { status: e.target.value as ApplicationStatus })}>{APPLICATION_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{application.applicationUrl && <a href={application.applicationUrl} target="_blank" rel="noreferrer" className="rounded-xl border border-slate-800 p-2 text-slate-400 hover:text-white"><ExternalLink size={16} /></a>}<button type="button" onClick={() => removeApplication(application.id)} className="rounded-xl border border-slate-800 p-2 text-slate-500 hover:border-rose-500/30 hover:text-rose-300" aria-label={`Delete ${application.name}`}><Trash2 size={16} /></button></div>
               </div>
-              <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-slate-800 pt-4 text-sm"><div className="flex items-center gap-2 text-slate-400"><CalendarDays size={15} className="text-indigo-400" /><span>{deadlineLabel(application.deadline)}</span></div>{days !== null && <span className={days < 0 ? 'font-semibold text-rose-300' : days <= 30 ? 'font-semibold text-amber-300' : 'text-slate-500'}>{days < 0 ? `${Math.abs(days)} days overdue` : days === 0 ? 'Due today' : `${days} days left`}</span>}<span className="text-xs text-slate-600">Eligibility: {application.eligibility}</span></div>
+              <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-slate-800 pt-4 text-sm"><label className="flex items-center gap-2 text-slate-400"><CalendarDays size={15} className="text-indigo-400" /><input aria-label={`${application.name} deadline`} className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1 text-sm text-slate-300" type="date" value={application.deadline ?? ''} onChange={(e) => updateApplication(application.id, { deadline: e.target.value || undefined })} /></label>{days !== null && <span className={days < 0 ? 'font-semibold text-rose-300' : days <= 30 ? 'font-semibold text-amber-300' : 'text-slate-500'}>{days < 0 ? `${Math.abs(days)} days overdue` : days === 0 ? 'Due today' : `${days} days left`}</span>}<span className="text-xs text-slate-600">Eligibility: {application.eligibility}</span></div>
             </article>;
           })}
         </section>
