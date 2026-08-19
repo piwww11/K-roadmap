@@ -16,8 +16,8 @@ export interface Phase { id: string; number: number; title: string; subtitle: st
 export interface Skill { id: string; title: string; track: MajorTrack; category: string; requiredTaskIds?: string[]; requiredSkillIds?: string[]; status: SkillStatus; unlockedAt?: string; completedAt?: string; }
 export interface JournalEntry { id: string; date: string; title: string; content: string; category: JournalCategory; mood: number; interest: number; tags: string[]; createdAt: string; }
 export interface ExperimentReflection { interest: number; energy: number; difficulty: number; wouldDoAgain: boolean; notes: string; createdAt: string; }
-export interface ExperimentAttempt { id: string; startedAt?: string; completedAt?: string; reflection?: ExperimentReflection; }
-export interface Experiment { id: string; title: string; description: string; majorId: string; estimatedMinutes: number; status: ExperimentStatus; createdAt: string; startedAt?: string; completedAt?: string; reflection?: ExperimentReflection; attempts: ExperimentAttempt[]; }
+export interface ExperimentAttempt { id: string; startedAt?: string; completedAt?: string; experimentName?: string; durationMinutes?: number; reflection?: ExperimentReflection; }
+export interface Experiment { id: string; title: string; customTitle?: string; description: string; majorId: string; estimatedMinutes: number; status: ExperimentStatus; createdAt: string; startedAt?: string; completedAt?: string; reflection?: ExperimentReflection; attempts: ExperimentAttempt[]; }
 
 export interface BudgetItem { id: string; name: string; amount: number; category: BudgetCategory; dueDate?: string; notes?: string; }
 export interface Budget { items: BudgetItem[]; targetAmount: number; currentSavings: number; }
