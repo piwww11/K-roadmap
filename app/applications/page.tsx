@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { CalendarDays, ExternalLink, GraduationCap, Plus, Trash2, WalletCards } from 'lucide-react';
 import { useApplicationTrackerStore, APPLICATION_PRIORITIES, APPLICATION_STATUSES, APPLICATION_TYPES } from '@/store/applicationTrackerStore';
-import { useJourneyStore } from '@/store/useJourneyStore';
 import type { ApplicationPriority, ApplicationStatus, ApplicationType } from '@/types/application';
 
 const inputClass = 'w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-200 outline-none transition focus:border-indigo-500';
@@ -38,7 +37,6 @@ export default function ApplicationsPage() {
   const addApplication = useApplicationTrackerStore((state) => state.addApplication);
   const updateApplication = useApplicationTrackerStore((state) => state.updateApplication);
   const removeApplication = useApplicationTrackerStore((state) => state.removeApplication);
-  const majors = useJourneyStore((state) => state.majors);
 
   const [savedMajors, setSavedMajors] = useState<string[]>([]);
   const [type, setType] = useState<ApplicationType>('university');
@@ -73,8 +71,6 @@ export default function ApplicationsPage() {
     });
   };
 
-  const selectMajor = (value: string) => setMajor(value);
-
   const stats = useMemo(() => {
     if (!hydrated) return { total: 0, active: 0, urgent: 0, submitted: 0 };
     const active = applications.filter((item) => !['accepted', 'rejected', 'withdrawn'].includes(item.status));
@@ -97,7 +93,7 @@ export default function ApplicationsPage() {
       organization: organization.trim(),
       country: country.trim() || 'Unknown',
       program: program.trim() || undefined,
-      major: majorValue || undefined,
+      majorLabel: majorValue || undefined,
       status: 'researching',
       priority,
       deadline: deadline || undefined,
@@ -106,7 +102,7 @@ export default function ApplicationsPage() {
       requiredDocumentIds: [],
       notes: undefined,
     });
-    setName(''); setOrganization(''); setProgram(''); setDeadline(''); setApplicationUrl('');
+    setName(''); setOrganization(''); setProgram(''); setDeadline(''); setApplicationUrl(''); setMajor('');
   };
 
   if (!hydrated) return <main className="min-h-screen bg-slate-950 p-8 text-slate-100" />;
@@ -138,8 +134,8 @@ export default function ApplicationsPage() {
             <input className={inputClass} placeholder="Program (optional)" value={program} onChange={(e) => setProgram(e.target.value)} />
             <div className="relative">
               <input className={inputClass} placeholder="Major (optional)" value={major} onChange={(e) => setMajor(e.target.value)} onBlur={() => rememberMajor(major)} list="saved-major-options" autoComplete="off" />
-              <datalist id="saved-major-options">{[...majors.map((item) => item.name), ...savedMajors].filter((item, index, all) => all.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index).map((item) => <option key={item} value={item} />)}</datalist>
-              {savedMajors.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{savedMajors.map((item) => <button key={item} type="button" onClick={() => selectMajor(item)} className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-400 hover:border-indigo-500/50 hover:text-indigo-300">{item}</button>)}</div>}
+              <datalist id="saved-major-options">{savedMajors.map((item) => <option key={item} value={item} />)}</datalist>
+              {savedMajors.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{savedMajors.map((item) => <button key={item} type="button" onClick={() => setMajor(item)} className="rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1 text-xs text-slate-400 hover:border-indigo-500/50 hover:text-indigo-300">{item}</button>)}</div>}
             </div>
             <div className="flex items-center rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-400">{deadline ? deadlineLabel(deadline) : 'No deadline selected'}</div>
             <select className={inputClass} value={priority} onChange={(e) => setPriority(e.target.value as ApplicationPriority)}>{APPLICATION_PRIORITIES.map((item) => <option key={item.value} value={item.value}>{item.label} priority</option>)}</select>
@@ -149,7 +145,7 @@ export default function ApplicationsPage() {
         </section>
 
         <section className="space-y-4">
-          {applications.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-10 text-center"><GraduationCap className="mx-auto text-slate-600" size={32} /><h2 className="mt-4 font-bold text-white">No applications tracked yet</h2><p className="mt-2 text-sm text-slate-500">Add your first university or scholarship target above.</p></div> : applications.map((application) => { const days = daysUntil(application.deadline); return <article key={application.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-slate-800 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{application.type}</span><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusTone(application.status)}`}>{APPLICATION_STATUSES.find((item) => item.value === application.status)?.label}</span><span className="text-xs text-slate-600">{application.priority} priority</span></div><h2 className="mt-3 text-xl font-bold text-white">{application.name}</h2><p className="mt-1 text-sm text-slate-400">{application.organization} · {application.country}{application.major ? ` · ${application.major}` : ''}</p>{application.program && <p className="mt-1 text-sm text-slate-500">{application.program}</p>}</div><div className="flex shrink-0 flex-wrap gap-2"><select className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300" value={application.status} onChange={(e) => updateApplication(application.id, { status: e.target.value as ApplicationStatus })}>{APPLICATION_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{application.applicationUrl && <a href={application.applicationUrl} target="_blank" rel="noreferrer" className="rounded-xl border border-slate-800 p-2 text-slate-400 hover:text-white"><ExternalLink size={16} /></a>}<button type="button" onClick={() => removeApplication(application.id)} className="rounded-xl border border-slate-800 p-2 text-slate-500 hover:border-rose-500/30 hover:text-rose-300" aria-label={`Delete ${application.name}`}><Trash2 size={16} /></button></div></div><div className="mt-5 flex flex-wrap items-center gap-4 border-t border-slate-800 pt-4 text-sm"><div className="flex items-center gap-2 text-slate-400"><CalendarDays size={15} className="text-indigo-400" /><span>{deadlineLabel(application.deadline)}</span></div>{days !== null && <span className={days < 0 ? 'font-semibold text-rose-300' : days <= 30 ? 'font-semibold text-amber-300' : 'text-slate-500'}>{days < 0 ? `${Math.abs(days)} days overdue` : days === 0 ? 'Due today' : `${days} days left`}</span>}<span className="text-xs text-slate-600">Eligibility: {application.eligibility}</span></div></article>; })}
+          {applications.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-10 text-center"><GraduationCap className="mx-auto text-slate-600" size={32} /><h2 className="mt-4 font-bold text-white">No applications tracked yet</h2><p className="mt-2 text-sm text-slate-500">Add your first university or scholarship target above.</p></div> : applications.map((application) => { const days = daysUntil(application.deadline); return <article key={application.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-slate-800 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{application.type}</span><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${statusTone(application.status)}`}>{APPLICATION_STATUSES.find((item) => item.value === application.status)?.label}</span><span className="text-xs text-slate-600">{application.priority} priority</span></div><h2 className="mt-3 text-xl font-bold text-white">{application.name}</h2><p className="mt-1 text-sm text-slate-400">{application.organization} · {application.country}{application.majorLabel ? ` · ${application.majorLabel}` : ''}</p>{application.program && <p className="mt-1 text-sm text-slate-500">{application.program}</p>}</div><div className="flex shrink-0 flex-wrap gap-2"><select className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300" value={application.status} onChange={(e) => updateApplication(application.id, { status: e.target.value as ApplicationStatus })}>{APPLICATION_STATUSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{application.applicationUrl && <a href={application.applicationUrl} target="_blank" rel="noreferrer" className="rounded-xl border border-slate-800 p-2 text-slate-400 hover:text-white"><ExternalLink size={16} /></a>}<button type="button" onClick={() => removeApplication(application.id)} className="rounded-xl border border-slate-800 p-2 text-slate-500 hover:border-rose-500/30 hover:text-rose-300" aria-label={`Delete ${application.name}`}><Trash2 size={16} /></button></div></div><div className="mt-5 flex flex-wrap items-center gap-4 border-t border-slate-800 pt-4 text-sm"><div className="flex items-center gap-2 text-slate-400"><CalendarDays size={15} className="text-indigo-400" /><span>{deadlineLabel(application.deadline)}</span></div>{days !== null && <span className={days < 0 ? 'font-semibold text-rose-300' : days <= 30 ? 'font-semibold text-amber-300' : 'text-slate-500'}>{days < 0 ? `${Math.abs(days)} days overdue` : days === 0 ? 'Due today' : `${days} days left`}</span>}<span className="text-xs text-slate-600">Eligibility: {application.eligibility}</span></div></article>; })}
         </section>
       </div>
     </main>
