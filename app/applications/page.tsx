@@ -34,7 +34,9 @@ function statusTone(status: ApplicationStatus) {
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const YEARS = Array.from({ length: 11 }, (_, index) => new Date().getFullYear() + index);
 
-function parseDeadline(deadline?: string) {
+type DeadlineParts = { day: string; month: string; year: string };
+
+function parseDeadline(deadline?: string): DeadlineParts {
   if (!deadline) return { day: '', month: '', year: '' };
   const [year, month, day] = deadline.split('-');
   return { day: day || '', month: month ? String(Number(month)) : '', year: year || '' };
@@ -51,25 +53,36 @@ function buildDeadline(year: string, month: string, day: string) {
 }
 
 function DeadlinePicker({ value, onChange, compact = false }: { value?: string; onChange: (value?: string) => void; compact?: boolean }) {
-  const parsed = parseDeadline(value);
-  const maxDays = parsed.year && parsed.month ? new Date(Number(parsed.year), Number(parsed.month), 0).getDate() : 31;
+  const [parts, setParts] = useState<DeadlineParts>(() => parseDeadline(value));
+
+  useEffect(() => {
+    setParts(parseDeadline(value));
+  }, [value]);
+
+  const maxDays = parts.year && parts.month ? new Date(Number(parts.year), Number(parts.month), 0).getDate() : 31;
   const days = Array.from({ length: maxDays }, (_, index) => index + 1);
   const selectClass = compact ? 'rounded-lg border border-slate-800 bg-slate-950 px-2 py-1 text-xs text-slate-300 outline-none focus:border-indigo-500' : inputClass;
-  const update = (year: string, month: string, day: string) => onChange(buildDeadline(year, month, day));
+
+  const updatePart = (key: keyof DeadlineParts, nextValue: string) => {
+    const next = { ...parts, [key]: nextValue };
+    setParts(next);
+    const complete = buildDeadline(next.year, next.month, next.day);
+    if (complete) onChange(complete);
+  };
 
   return (
     <div className="flex flex-wrap gap-2">
-      <select aria-label="Deadline month" className={selectClass} value={parsed.month} onChange={(e) => update(parsed.year, e.target.value, parsed.day)}>
+      <select aria-label="Deadline month" className={selectClass} value={parts.month} onChange={(e) => updatePart('month', e.target.value)}>
         <option value="">Month</option>
-        {MONTHS.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}
+        {MONTHS.map((month, index) => <option key={month} value={String(index + 1)}>{month}</option>)}
       </select>
-      <select aria-label="Deadline day" className={selectClass} value={parsed.day} onChange={(e) => update(parsed.year, parsed.month, e.target.value)}>
+      <select aria-label="Deadline day" className={selectClass} value={parts.day} onChange={(e) => updatePart('day', e.target.value)}>
         <option value="">Day</option>
-        {days.map((day) => <option key={day} value={day}>{day}</option>)}
+        {days.map((day) => <option key={day} value={String(day)}>{day}</option>)}
       </select>
-      <select aria-label="Deadline year" className={selectClass} value={parsed.year} onChange={(e) => update(e.target.value, parsed.month, parsed.day)}>
+      <select aria-label="Deadline year" className={selectClass} value={parts.year} onChange={(e) => updatePart('year', e.target.value)}>
         <option value="">Year</option>
-        {YEARS.map((year) => <option key={year} value={year}>{year}</option>)}
+        {YEARS.map((year) => <option key={year} value={String(year)}>{year}</option>)}
       </select>
     </div>
   );
