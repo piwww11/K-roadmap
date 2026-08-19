@@ -16,6 +16,7 @@ import {
   BarChart3,
   ChevronDown,
   Scale,
+  ClipboardList,
 } from 'lucide-react';
 
 const navigation = [
@@ -28,6 +29,7 @@ const navigation = [
   { name: 'Skills', href: '/skills', icon: Brain },
   { name: 'Documents', href: '/documents', icon: FileText },
   { name: 'Budget', href: '/budget', icon: Wallet },
+  { name: 'Applications', href: '/applications', icon: ClipboardList },
   { name: 'Readiness', href: '/readiness', icon: ShieldCheck },
 ];
 
