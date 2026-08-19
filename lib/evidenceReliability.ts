@@ -54,7 +54,7 @@ export function assessEvidenceReliability(analysis: MajorDecisionAnalysis): Evid
   const repeatSignal = analysis.wouldDoAgainRate ?? 0;
   const consistency = clamp(consistencyBase * 0.55 + repeatSignal * 0.45);
 
-  const recency = evidenceCount === 0
+  const maturity = evidenceCount === 0
     ? 0
     : analysis.reflectedAttempts && analysis.reflectedAttempts > 0
       ? clamp(55 + Math.min(45, analysis.reflectedAttempts * 10))
@@ -72,7 +72,7 @@ export function assessEvidenceReliability(analysis: MajorDecisionAnalysis): Evid
       key: 'breadth',
       label: 'Evidence breadth',
       score: breadth,
-      explanation: `${evidenceCount} completed evidence-producing activity${evidenceCount === 1 ? '' : 'ies'}.`,
+      explanation: `${evidenceCount} completed evidence-producing ${evidenceCount === 1 ? 'activity' : 'activities'}.`,
     },
     {
       key: 'depth',
@@ -91,7 +91,7 @@ export function assessEvidenceReliability(analysis: MajorDecisionAnalysis): Evid
     {
       key: 'recency',
       label: 'Evidence maturity',
-      score: recency,
+      score: maturity,
       explanation: 'Maturity increases as evidence is repeatedly generated and reflected on rather than inferred from a single signal.',
     },
     {
@@ -106,7 +106,7 @@ export function assessEvidenceReliability(analysis: MajorDecisionAnalysis): Evid
     breadth * 0.2 +
     depth * 0.25 +
     consistency * 0.2 +
-    recency * 0.1 +
+    maturity * 0.1 +
     behavioral * 0.25
   );
 
