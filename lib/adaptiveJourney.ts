@@ -23,7 +23,7 @@ function allTasks(phases: Phase[]): Task[] {
 }
 
 function taskMatchesMajor(task: Task, majorId: string): boolean {
-  return task.explorationMajorIds?.includes(majorId) || task.majorReward?.majorId === majorId;
+  return Boolean(task.explorationMajorIds?.includes(majorId) || task.majorReward?.majorId === majorId);
 }
 
 function chooseMode(focus?: MajorComparisonEntry): AdaptiveJourneyModel['mode'] {
@@ -73,10 +73,7 @@ export function buildAdaptiveJourneyModel({
         if (mode === 'prepare') { score += 28; reasons.push('Application preparation becomes more valuable as evidence matures.'); }
         else score -= 8;
       }
-      if (task.dueDate) {
-        const days = (new Date(task.dueDate).getTime() - Date.now()) / 86400000;
-        if (days >= 0 && days <= 14) { score += 30; reasons.push('Due within the next two weeks.'); }
-      }
+      if (task.dueDate) { score += 15; reasons.push('Has a defined due date, so it stays visible in the adaptive queue.'); }
       if (!reasons.length) reasons.push('Keeps the baseline roadmap moving.');
       return { task, score, reasons: reasons.slice(0, 3), focusMajorId: matchesFocus ? focusMajor?.majorId : undefined } satisfies AdaptiveTaskRecommendation;
     })
@@ -85,7 +82,7 @@ export function buildAdaptiveJourneyModel({
 
   const focusReason = focusMajor
     ? `${focusMajor.name} is currently the adaptive leader at ${focusMajor.adaptiveScore}/100, so the journey prioritizes actions that strengthen or validate that signal instead of permanently rewriting your roadmap.`
-    : 'No Major Decision result is available yet, so Adaptive Journey stays conservative and only prioritizes momentum and near-term work.';
+    : 'No Major Decision result is available yet, so Adaptive Journey stays conservative and only prioritizes momentum and scheduled work.';
 
   return {
     focusMajor,
