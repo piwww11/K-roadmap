@@ -21,21 +21,19 @@ export async function GET(request: NextRequest) {
     callbackUrl.searchParams.set('next', next);
   }
 
-  let response = NextResponse.next({ request });
+  const cookiesToSet: {
+    name: string;
+    value: string;
+    options: CookieOptions;
+  }[] = [];
 
   const supabase = createServerClient(url, key, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(cookiesToSet: {
-        name: string;
-        value: string;
-        options: CookieOptions;
-      }[]) {
-        cookiesToSet.forEach(({ name, value, options }) => {
-          response.cookies.set(name, value, options);
-        });
+      setAll(cookies) {
+        cookiesToSet.push(...cookies);
       },
     },
   });
@@ -54,9 +52,10 @@ export async function GET(request: NextRequest) {
   }
 
   const redirectResponse = NextResponse.redirect(data.url);
-  response.cookies.getAll().forEach((cookie) => {
-    redirectResponse.cookies.set(cookie.name, cookie.value);
-  });
+
+  for (const cookie of cookiesToSet) {
+    redirectResponse.cookies.set(cookie.name, cookie.value, cookie.options);
+  }
 
   return redirectResponse;
 }
