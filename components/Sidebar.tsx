@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { LayoutDashboard, Map, GraduationCap, Brain, FileText, Wallet, FlaskConical, ShieldCheck, CalendarCheck, Compass, BarChart3, ChevronDown, Scale, ClipboardList, CalendarDays, Menu, X } from 'lucide-react';
+import AuthStatus from './AuthStatus';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -111,7 +112,7 @@ export default function Sidebar() {
           </div>
         </nav>
 
-        <div className="mt-4 shrink-0 rounded-2xl border border-slate-800 bg-slate-900/60 p-4"><div className="mb-2 flex items-center justify-between"><span className="text-xs font-semibold text-slate-400">JOURNEY STATUS</span><span className="h-2 w-2 rounded-full bg-emerald-400"/></div><p className="text-xs leading-relaxed text-slate-500">Building the path, one step at a time.</p></div>
+        <div className="mt-4 shrink-0 rounded-2xl border border-slate-800 bg-slate-900/60 p-4"><div className="mb-2 flex items-center justify-between"><span className="text-xs font-semibold text-slate-400">JOURNEY STATUS</span><span className="h-2 w-2 rounded-full bg-emerald-400"/></div><p className="text-xs leading-relaxed text-slate-500">Building the path, one step at a time.</p><AuthStatus /></div>
       </aside>
     </>
   );
