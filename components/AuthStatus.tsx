@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { LogIn, LogOut, Loader2 } from 'lucide-react';
-import type { User } from '@supabase/supabase-js';
+import type { AuthChangeEvent, Session, User } from '@supabase/supabase-js';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { signOut } from '@/lib/auth';
 
@@ -16,16 +16,18 @@ export default function AuthStatus() {
     const supabase = getSupabaseClient();
     let active = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    void supabase.auth.getSession().then(({ data }: { data: { session: Session | null } }) => {
       if (active) {
         setUser(data.session?.user ?? null);
         setLoading(false);
       }
     });
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (active) setUser(session?.user ?? null);
-    });
+    const { data: subscription } = supabase.auth.onAuthStateChange(
+      (_event: AuthChangeEvent, session: Session | null) => {
+        if (active) setUser(session?.user ?? null);
+      }
+    );
 
     return () => {
       active = false;
