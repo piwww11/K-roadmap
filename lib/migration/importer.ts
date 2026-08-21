@@ -108,17 +108,23 @@ export async function importMigrationData(
   }))));
   if (!(await upsert('journey_goals', goals))) return { success: false, userId, insertedOrUpdated: count, errors };
 
-  const tasks = data.journey.phases.flatMap((phase) => phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks.map((task) => ({
-    id: task.id,
-    user_id: userId,
-    goal_id: task.goalId,
-    status: task.status,
-    major_reward: task.majorReward ?? null,
-    exploration_major_ids: task.explorationMajorIds ?? [],
-    unlocks_skill_ids: task.unlocksSkillIds ?? [],
-    depends_on_task_ids: [],
-    payload: toPayload(task),
-  }))))));
+  const tasks = data.journey.phases.flatMap((phase) =>
+    phase.months.flatMap((month) =>
+      month.goals.flatMap((goal) =>
+        goal.tasks.map((task) => ({
+          id: task.id,
+          user_id: userId,
+          goal_id: task.goalId,
+          status: task.status,
+          major_reward: task.majorReward ?? null,
+          exploration_major_ids: task.explorationMajorIds ?? [],
+          unlocks_skill_ids: task.unlocksSkillIds ?? [],
+          depends_on_task_ids: [],
+          payload: toPayload(task),
+        })),
+      ),
+    ),
+  );
   if (!(await upsert('journey_tasks', tasks))) return { success: false, userId, insertedOrUpdated: count, errors };
 
   const skills = data.journey.skills.map((skill: Skill) => ({
