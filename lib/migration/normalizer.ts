@@ -24,7 +24,9 @@ export interface NormalizationIssue {
 
 export interface LocalApplicationRecord {
   id: string;
-  [key: string]: unknown;
+  // Application tracker is a legacy persisted store whose shape is intentionally open-ended.
+  // The importer narrows individual fields at the cloud boundary.
+  [key: string]: any;
 }
 
 export interface NormalizedJourneyData {
