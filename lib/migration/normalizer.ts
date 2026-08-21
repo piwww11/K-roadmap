@@ -86,6 +86,8 @@ function uniqueIds(values: unknown): string[] {
 
 function normalizePhases(phases: unknown): Phase[] {
   if (!Array.isArray(phases)) return [];
+  // Keep derived progress/status in the normalized snapshot for preview/debugging.
+  // The later cloud adapter must intentionally omit them from source-of-truth writes.
   return clone(phases).map((phase: Phase) => ({
     ...phase,
     months: Array.isArray(phase.months)
@@ -94,9 +96,6 @@ function normalizePhases(phases: unknown): Phase[] {
           goals: Array.isArray(month.goals)
             ? month.goals.map((goal) => ({
                 ...goal,
-                // progress/status are derived from tasks and will not be uploaded as source data.
-                progress: undefined,
-                status: undefined,
                 tasks: Array.isArray(goal.tasks)
                   ? goal.tasks.map((task) => ({
                       ...task,
@@ -115,8 +114,8 @@ function normalizeMajors(majors: unknown): Major[] {
   if (!Array.isArray(majors)) return [];
   return clone(majors).map((major: Major) => ({
     ...major,
-    // confidenceScore is derived from base confidence + completed-task rewards.
-    confidenceScore: major.baseConfidenceScore ?? major.confidenceScore,
+    // Preserve the local value for preview; cloud writes must use baseConfidenceScore as source.
+    confidenceScore: major.confidenceScore,
   }));
 }
 
