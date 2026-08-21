@@ -44,6 +44,8 @@ export async function importMigrationData(
   }
 
   const userId = authData.user.id;
+  const majorIds = new Set(data.journey.majors.map((major) => major.id));
+  const documentIds = new Set(data.journey.documents.map((document) => document.id));
 
   async function upsert(table: string, rows: Record<string, unknown>[]) {
     if (!rows.length) return true;
@@ -56,8 +58,6 @@ export async function importMigrationData(
     return true;
   }
 
-  // Parent records first. Every request is scoped with the authenticated user id;
-  // RLS remains the final authorization boundary.
   const profile = {
     id: userId,
     display_name: authData.user.user_metadata?.full_name ?? authData.user.email ?? null,
@@ -170,7 +170,7 @@ export async function importMigrationData(
   const experiments = data.experiments.experiments.map((experiment) => ({
     id: experiment.id,
     user_id: userId,
-    major_id: experiment.majorId || null,
+    major_id: majorIds.has(experiment.majorId) ? experiment.majorId : null,
     title: experiment.title,
     custom_title: experiment.customTitle ?? null,
     description: experiment.description,
@@ -197,58 +197,36 @@ export async function importMigrationData(
   const reflections = data.experiments.experiments.flatMap((experiment) => {
     const rows = [] as Record<string, unknown>[];
     if (experiment.reflection) rows.push({
-      id: reflectionId(experiment.id),
-      user_id: userId,
-      experiment_id: experiment.id,
-      attempt_id: null,
-      interest: experiment.reflection.interest,
-      energy: experiment.reflection.energy,
-      difficulty: experiment.reflection.difficulty,
-      would_do_again: experiment.reflection.wouldDoAgain,
-      notes: experiment.reflection.notes,
-      reflected_at: isoOrNull(experiment.reflection.createdAt),
-      payload: toPayload(experiment.reflection),
+      id: reflectionId(experiment.id), user_id: userId, experiment_id: experiment.id, attempt_id: null,
+      interest: experiment.reflection.interest, energy: experiment.reflection.energy, difficulty: experiment.reflection.difficulty,
+      would_do_again: experiment.reflection.wouldDoAgain, notes: experiment.reflection.notes,
+      reflected_at: isoOrNull(experiment.reflection.createdAt), payload: toPayload(experiment.reflection),
     });
     for (const attempt of experiment.attempts) if (attempt.reflection) rows.push({
-      id: reflectionId(experiment.id, attempt.id),
-      user_id: userId,
-      experiment_id: experiment.id,
-      attempt_id: attempt.id,
-      interest: attempt.reflection.interest,
-      energy: attempt.reflection.energy,
-      difficulty: attempt.reflection.difficulty,
-      would_do_again: attempt.reflection.wouldDoAgain,
-      notes: attempt.reflection.notes,
-      reflected_at: isoOrNull(attempt.reflection.createdAt),
-      payload: toPayload(attempt.reflection),
+      id: reflectionId(experiment.id, attempt.id), user_id: userId, experiment_id: experiment.id, attempt_id: attempt.id,
+      interest: attempt.reflection.interest, energy: attempt.reflection.energy, difficulty: attempt.reflection.difficulty,
+      would_do_again: attempt.reflection.wouldDoAgain, notes: attempt.reflection.notes,
+      reflected_at: isoOrNull(attempt.reflection.createdAt), payload: toPayload(attempt.reflection),
     });
     return rows;
   });
   if (!(await upsert('experiment_reflections', reflections))) return { success: false, userId, insertedOrUpdated: count, errors };
 
   const applications = data.applications.applications.map((application) => ({
-    id: application.id,
-    user_id: userId,
-    type: application.type,
-    name: application.name,
-    organization: application.organization,
-    country: application.country,
-    program: application.program ?? null,
-    major_id: application.majorId ?? null,
-    major_label: application.majorLabel ?? null,
-    status: application.status,
-    priority: application.priority,
-    deadline: isoOrNull(application.deadline),
-    eligibility: application.eligibility ?? null,
-    application_url: application.applicationUrl ?? null,
-    notes: application.notes ?? null,
-    payload: toPayload(application),
+    id: application.id, user_id: userId, type: application.type, name: application.name,
+    organization: application.organization, country: application.country, program: application.program ?? null,
+    major_id: application.majorId && majorIds.has(application.majorId) ? application.majorId : null,
+    major_label: application.majorLabel ?? null, status: application.status, priority: application.priority,
+    deadline: isoOrNull(application.deadline), eligibility: application.eligibility ?? null,
+    application_url: application.applicationUrl ?? null, notes: application.notes ?? null, payload: toPayload(application),
   }));
   if (!(await upsert('applications', applications))) return { success: false, userId, insertedOrUpdated: count, errors };
 
   const applicationDocuments = data.applications.applications.flatMap((application) => {
     const ids = Array.isArray(application.requiredDocumentIds) ? application.requiredDocumentIds : [];
-    return ids.map((documentId) => ({ application_id: application.id, document_id: documentId, user_id: userId }));
+    return ids.filter((documentId) => documentIds.has(documentId)).map((documentId) => ({
+      application_id: application.id, document_id: documentId, user_id: userId,
+    }));
   });
   if (applicationDocuments.length) {
     const { error } = await supabase.from('application_documents').upsert(applicationDocuments, { onConflict: 'application_id,document_id' });
@@ -267,14 +245,8 @@ export async function importMigrationData(
   }
 
   const budgetItems = data.journey.budget.items.map((item) => ({
-    id: item.id,
-    user_id: userId,
-    name: item.name,
-    amount: item.amount,
-    category: item.category,
-    due_date: dateOrNull(item.dueDate),
-    notes: item.notes ?? null,
-    payload: toPayload(item),
+    id: item.id, user_id: userId, name: item.name, amount: item.amount, category: item.category,
+    due_date: dateOrNull(item.dueDate), notes: item.notes ?? null, payload: toPayload(item),
   }));
   if (!(await upsert('budget_items', budgetItems))) return { success: false, userId, insertedOrUpdated: count, errors };
 
