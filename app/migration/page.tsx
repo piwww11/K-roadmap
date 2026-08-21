@@ -3,10 +3,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ArrowLeft, CheckCircle2, Cloud, Database, Loader2, ShieldCheck, XCircle } from 'lucide-react';
 import Link from 'next/link';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 import { buildMigrationPreview } from '@/lib/migration/validator';
+import { importMigrationData } from '@/lib/migration/importer';
+import { verifyMigration, type MigrationVerificationResult } from '@/lib/migration/verifier';
 import { normalizeLocalSnapshot, readLocalStorageSnapshot, type NormalizedMigrationData } from '@/lib/migration/normalizer';
 
 type Preview = ReturnType<typeof buildMigrationPreview>;
+
+type ImportState = 'idle' | 'confirming' | 'importing' | 'verifying' | 'success' | 'error';
 
 const emptyPreview: Preview = {
   status: 'READY',
@@ -46,9 +51,14 @@ export default function MigrationPage() {
   const [preview, setPreview] = useState<Preview>(emptyPreview);
   const [scanning, setScanning] = useState(true);
   const [hasLocalData, setHasLocalData] = useState(false);
+  const [importState, setImportState] = useState<ImportState>('idle');
+  const [importError, setImportError] = useState<string | null>(null);
+  const [verification, setVerification] = useState<MigrationVerificationResult | null>(null);
 
   const scan = () => {
     setScanning(true);
+    setImportError(null);
+    setVerification(null);
     try {
       const snapshot = readLocalStorageSnapshot();
       const normalized = normalizeLocalSnapshot(snapshot);
@@ -78,6 +88,40 @@ export default function MigrationPage() {
     BLOCKED: <XCircle size={18} />,
   } as const;
 
+  const isBusy = importState === 'importing' || importState === 'verifying';
+
+  async function startImport() {
+    if (!data || !preview.canImport || isBusy) return;
+    setImportState('confirming');
+  }
+
+  async function confirmImport() {
+    if (!data || !preview.canImport) return;
+    setImportState('importing');
+    setImportError(null);
+    setVerification(null);
+
+    try {
+      const supabase = getSupabaseClient();
+      const result = await importMigrationData(supabase, data);
+      if (!result.success) {
+        throw new Error(result.errors.join('\n') || 'Cloud import failed. No local data was deleted.');
+      }
+
+      setImportState('verifying');
+      const verified = await verifyMigration(supabase, data);
+      setVerification(verified);
+      if (!verified.verified) {
+        throw new Error(verified.errors.join('\n') || 'Cloud verification failed. You can safely retry the import.');
+      }
+
+      setImportState('success');
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Cloud import failed.');
+      setImportState('error');
+    }
+  }
+
   return (
     <main className="min-h-screen px-6 py-10 text-white">
       <div className="mx-auto max-w-4xl">
@@ -91,9 +135,9 @@ export default function MigrationPage() {
               <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/15 text-indigo-300"><Cloud size={24} /></div>
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-400">Phase 2 · Migration Preview</p>
               <h1 className="mt-2 text-3xl font-bold">Review your local progress.</h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">K-Roadmap found the data currently stored in this browser. This screen only reads and validates it. Nothing is uploaded, overwritten, or deleted here.</p>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">K-Roadmap found the data currently stored in this browser. Import is explicit and idempotent. Your local data is never deleted by this migration.</p>
             </div>
-            <button type="button" onClick={scan} disabled={scanning} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-2.5 text-xs font-semibold text-slate-300 transition hover:border-slate-600 hover:text-white disabled:opacity-50">
+            <button type="button" onClick={scan} disabled={scanning || isBusy} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-2.5 text-xs font-semibold text-slate-300 transition hover:border-slate-600 hover:text-white disabled:opacity-50">
               {scanning ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
               {scanning ? 'Scanning...' : 'Scan again'}
             </button>
@@ -109,7 +153,7 @@ export default function MigrationPage() {
                 {statusIcon[preview.status]}
                 <div>
                   <p className="text-sm font-bold">Migration status: {preview.status}</p>
-                  <p className="mt-0.5 text-xs opacity-80">{preview.status === 'BLOCKED' ? 'Fix the errors below before any future cloud import can proceed.' : preview.status === 'WARNING' ? 'Data is structurally valid, but some values require explicit review.' : 'Local data passed the safety checks.'}</p>
+                  <p className="mt-0.5 text-xs opacity-80">{preview.status === 'BLOCKED' ? 'Fix the errors below before cloud import can proceed.' : preview.status === 'WARNING' ? 'Data is structurally valid, but some values require explicit review.' : 'Local data passed the safety checks.'}</p>
                 </div>
               </div>
 
@@ -120,7 +164,7 @@ export default function MigrationPage() {
               </div>
 
               {data && data.journey.budget.legacyCurrentSavings !== 0 && (
-                <div className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4"><p className="text-sm font-semibold text-amber-300">Legacy savings needs review</p><p className="mt-1 text-xs leading-5 text-slate-400">Your local currentSavings value is preserved for review, but it will not become the cloud balance source of truth. Saving transactions will determine the cloud balance.</p></div>
+                <div className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4"><p className="text-sm font-semibold text-amber-300">Legacy savings needs review</p><p className="mt-1 text-xs leading-5 text-slate-400">Your local currentSavings value is preserved in the cloud budget payload for audit, but it will not become the cloud balance source of truth. Saving transactions determine the cloud balance.</p></div>
               )}
 
               {(preview.errors.length > 0 || preview.warnings.length > 0) && (
@@ -130,7 +174,38 @@ export default function MigrationPage() {
                 </div>
               )}
 
-              <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-950/40 p-5"><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 shrink-0 text-emerald-400" size={19} /><div><p className="text-sm font-semibold text-white">Safe preview only</p><p className="mt-1 text-xs leading-5 text-slate-500">Cloud import is intentionally disabled in this step. Your localStorage remains untouched. The next implementation will add an explicit confirmation and a separate cloud write transaction after this preview is verified.</p></div></div></div>
+              {importState === 'confirming' && (
+                <div className="mt-8 rounded-2xl border border-indigo-500/25 bg-indigo-500/5 p-5">
+                  <p className="text-sm font-bold text-white">Ready to import {totalRecords} local records?</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-400">This copies your local progress into the signed-in K-Roadmap cloud account. Existing cloud rows with the same stable IDs are safely updated rather than duplicated. Your localStorage will not be deleted or overwritten.</p>
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    <button type="button" onClick={confirmImport} className="rounded-xl bg-indigo-500 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-400">Confirm import</button>
+                    <button type="button" onClick={() => setImportState('idle')} className="rounded-xl border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-300 transition hover:text-white">Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {importState === 'idle' && preview.canImport && (
+                <button type="button" onClick={startImport} className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-500 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-indigo-400"><Cloud size={18} /> Import {totalRecords} records to Cloud</button>
+              )}
+
+              {isBusy && (
+                <div className="mt-8 flex items-center justify-center rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 text-sm text-indigo-200"><Loader2 size={18} className="mr-2 animate-spin" /> {importState === 'importing' ? 'Importing local progress safely...' : 'Verifying cloud records...'}</div>
+              )}
+
+              {importState === 'success' && verification?.verified && (
+                <div className="mt-8 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5"><div className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 text-emerald-400" size={20} /><div><p className="text-sm font-bold text-emerald-300">Cloud migration verified</p><p className="mt-1 text-xs leading-5 text-slate-400">Every migrated record count matches the local snapshot. Your localStorage remains intact. It is now safe to proceed to cloud-aware Zustand sync.</p></div></div></div>
+              )}
+
+              {(importState === 'error' || importError) && (
+                <div className="mt-8 rounded-2xl border border-rose-500/20 bg-rose-500/5 p-5"><div className="flex items-start gap-3"><XCircle className="mt-0.5 text-rose-400" size={20} /><div><p className="text-sm font-bold text-rose-300">Cloud migration did not complete</p><p className="mt-1 whitespace-pre-line text-xs leading-5 text-slate-400">{importError}</p><button type="button" onClick={() => setImportState('idle')} className="mt-4 rounded-xl border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white">Retry import</button></div></div></div>
+              )}
+
+              {importState === 'idle' && !preview.canImport && (
+                <div className="mt-8 rounded-2xl border border-rose-500/15 bg-rose-500/5 p-5 text-sm text-rose-300">Cloud import is blocked until the migration validator reports no errors.</div>
+              )}
+
+              <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-950/40 p-5"><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 shrink-0 text-emerald-400" size={19} /><div><p className="text-sm font-semibold text-white">Migration safety rules</p><p className="mt-1 text-xs leading-5 text-slate-500">Import is authenticated, scoped by Supabase RLS, idempotent by stable local IDs, verified by post-import counts, and never deletes localStorage.</p></div></div></div>
             </>
           )}
         </div>
