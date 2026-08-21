@@ -27,6 +27,7 @@ const emptyPreview: Preview = {
     achievements: 0,
     majorDecisions: 0,
     budgetItems: 0,
+    savingTransactions: 0,
     experiments: 0,
     experimentAttempts: 0,
     experimentReflections: 0,
@@ -160,11 +161,11 @@ export default function MigrationPage() {
               <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <CountCard label="Phases" value={preview.counts.phases} /><CountCard label="Goals" value={preview.counts.goals} /><CountCard label="Tasks" value={preview.counts.tasks} /><CountCard label="Majors" value={preview.counts.majors} />
                 <CountCard label="Skills" value={preview.counts.skills} /><CountCard label="Journal" value={preview.counts.journalEntries} /><CountCard label="Documents" value={preview.counts.documents} /><CountCard label="Experiments" value={preview.counts.experiments} />
-                <CountCard label="Attempts" value={preview.counts.experimentAttempts} /><CountCard label="Reflections" value={preview.counts.experimentReflections} /><CountCard label="Applications" value={preview.counts.applications} /><CountCard label="Total records" value={totalRecords} />
+                <CountCard label="Attempts" value={preview.counts.experimentAttempts} /><CountCard label="Reflections" value={preview.counts.experimentReflections} /><CountCard label="Applications" value={preview.counts.applications} /><CountCard label="Saving transactions" value={preview.counts.savingTransactions} /><CountCard label="Total records" value={totalRecords} />
               </div>
 
               {data && data.journey.budget.legacyCurrentSavings !== 0 && (
-                <div className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4"><p className="text-sm font-semibold text-amber-300">Legacy savings needs review</p><p className="mt-1 text-xs leading-5 text-slate-400">Your local currentSavings value is preserved in the cloud budget payload for audit, but it will not become the cloud balance source of truth. Saving transactions determine the cloud balance.</p></div>
+                <div className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4"><p className="text-sm font-semibold text-amber-300">Legacy savings needs review</p><p className="mt-1 text-xs leading-5 text-slate-400">Your local currentSavings value is preserved as legacyCurrentSavings in the cloud budget payload for audit only. It creates no saving transaction and never becomes the cloud balance source of truth. The cloud balance is the signed sum of saving transactions.</p></div>
               )}
 
               {(preview.errors.length > 0 || preview.warnings.length > 0) && (

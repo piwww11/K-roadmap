@@ -38,11 +38,24 @@ export interface NormalizedJourneyData {
   budget: {
     items: BudgetItem[];
     targetAmount: number;
+    /**
+     * Only transactions explicitly stored by a future local transaction ledger
+     * are eligible for import. Legacy `currentSavings` is never converted into
+     * one of these records.
+     */
+    savingTransactions: NormalizedSavingTransaction[];
     legacyCurrentSavings: number;
   };
   documents: DocumentItem[];
   achievements: Achievement[];
   majorDecisions: MajorDecisionResponse[];
+}
+
+export interface NormalizedSavingTransaction {
+  id: string;
+  amount: number;
+  note: string | null;
+  occurredAt: string;
 }
 
 export interface NormalizedExperimentData {
@@ -130,22 +143,63 @@ function normalizeSkills(skills: unknown): Skill[] {
   }));
 }
 
-function normalizeBudget(state: AnyRecord): NormalizedJourneyData['budget'] {
+function normalizeBudget(
+  state: AnyRecord,
+  issues: NormalizationIssue[],
+): NormalizedJourneyData['budget'] {
   const budget = isRecord(state.budget) ? state.budget : {};
+  const savingTransactions: NormalizedSavingTransaction[] = [];
+
+  if (Array.isArray(budget.savingTransactions)) {
+    budget.savingTransactions.forEach((transaction, index) => {
+      if (!isRecord(transaction)) {
+        issues.push({ severity: 'error', path: `budget.savingTransactions.${index}`, message: 'Saving transaction must be an object.' });
+        return;
+      }
+
+      const occurredAt = typeof transaction.occurredAt === 'string'
+        ? new Date(transaction.occurredAt)
+        : null;
+      if (
+        typeof transaction.id !== 'string' ||
+        !transaction.id ||
+        typeof transaction.amount !== 'number' ||
+        !Number.isFinite(transaction.amount) ||
+        transaction.amount === 0 ||
+        !occurredAt ||
+        Number.isNaN(occurredAt.getTime()) ||
+        (transaction.note !== undefined && transaction.note !== null && typeof transaction.note !== 'string')
+      ) {
+        issues.push({ severity: 'error', path: `budget.savingTransactions.${index}`, message: 'Saving transaction requires a stable ID, a non-zero finite amount, an ISO timestamp, and an optional text note.' });
+        return;
+      }
+
+      savingTransactions.push({
+        id: transaction.id,
+        amount: transaction.amount,
+        note: transaction.note ?? null,
+        occurredAt: occurredAt.toISOString(),
+      });
+    });
+  }
+
   return {
     items: Array.isArray(budget.items) ? clone(budget.items) : [],
     targetAmount: typeof budget.targetAmount === 'number' && Number.isFinite(budget.targetAmount)
       ? budget.targetAmount
       : 0,
+    savingTransactions,
     // Kept only for migration preview. It is intentionally NOT a cloud balance source of truth.
     legacyCurrentSavings:
-      typeof budget.currentSavings === 'number' && Number.isFinite(budget.currentSavings)
+      typeof budget.legacyCurrentSavings === 'number' && Number.isFinite(budget.legacyCurrentSavings)
+        ? budget.legacyCurrentSavings
+        : typeof budget.currentSavings === 'number' && Number.isFinite(budget.currentSavings)
         ? budget.currentSavings
         : 0,
   };
 }
 
-function normalizeJourney(raw: unknown): NormalizedJourneyData {
+function normalizeJourney(raw: unknown, issues: NormalizationIssue[]): NormalizedJourneyData {
   const state = unwrapPersistedState(raw);
   return {
     myWhy: typeof state.myWhy === 'string' ? state.myWhy : '',
@@ -153,7 +207,7 @@ function normalizeJourney(raw: unknown): NormalizedJourneyData {
     majors: normalizeMajors(state.majors),
     skills: normalizeSkills(state.skills),
     journalEntries: Array.isArray(state.journalEntries) ? clone(state.journalEntries) : [],
-    budget: normalizeBudget(state),
+    budget: normalizeBudget(state, issues),
     documents: Array.isArray(state.documents) ? clone(state.documents) : [],
     achievements: Array.isArray(state.achievements) ? clone(state.achievements) : [],
     majorDecisions: Array.isArray(state.majorDecisions) ? clone(state.majorDecisions) : [],
@@ -200,7 +254,7 @@ function collectTaskIds(phases: Phase[]): Set<string> {
 
 export function normalizeLocalSnapshot(snapshot: LocalStorageSnapshot): NormalizedMigrationData {
   const issues: NormalizationIssue[] = [];
-  const journey = normalizeJourney(snapshot.journey);
+  const journey = normalizeJourney(snapshot.journey, issues);
   const experiments = normalizeExperiments(snapshot.experiments);
   const applications = normalizeApplications(snapshot.applications);
 
@@ -283,6 +337,7 @@ export function getMigrationCounts(data: NormalizedMigrationData) {
     achievements: data.journey.achievements.length,
     majorDecisions: data.journey.majorDecisions.length,
     budgetItems: data.journey.budget.items.length,
+    savingTransactions: data.journey.budget.savingTransactions.length,
     experiments: data.experiments.experiments.length,
     experimentAttempts: attempts.length,
     experimentReflections: reflections,

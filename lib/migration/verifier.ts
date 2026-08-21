@@ -26,10 +26,21 @@ const tableMap = {
   experimentReflections: 'experiment_reflections',
   applications: 'applications',
   budgetItems: 'budget_items',
+  savingTransactions: 'saving_transactions',
 } as const;
 
 async function countOwnRows(supabase: SupabaseClient, table: string) {
   const { count, error } = await supabase.from(table).select('id', { count: 'exact', head: true });
+  if (error) throw new Error(`${table}: ${error.message}`);
+  return count ?? 0;
+}
+
+async function countRowsByIds(supabase: SupabaseClient, table: string, ids: string[]) {
+  if (!ids.length) return 0;
+  const { count, error } = await supabase
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .in('id', ids);
   if (error) throw new Error(`${table}: ${error.message}`);
   return count ?? 0;
 }
@@ -54,6 +65,7 @@ export async function verifyMigration(
     experimentReflections: counts.experimentReflections,
     applications: counts.applications,
     budgetItems: counts.budgetItems,
+    savingTransactions: counts.savingTransactions,
   };
 
   const actual: Record<string, number> = {};
@@ -61,7 +73,13 @@ export async function verifyMigration(
 
   for (const [key, table] of Object.entries(tableMap)) {
     try {
-      actual[key] = await countOwnRows(supabase, table);
+      actual[key] = key === 'savingTransactions'
+        ? await countRowsByIds(
+            supabase,
+            table,
+            data.journey.budget.savingTransactions.map((transaction) => transaction.id),
+          )
+        : await countOwnRows(supabase, table);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : `${table}: verification failed`);
       actual[key] = -1;

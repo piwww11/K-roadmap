@@ -32,6 +32,7 @@ export function validateMigrationData(data: NormalizedMigrationData): MigrationV
   addDuplicateIssues(data.experiments.experiments.map((experiment) => experiment.id), 'experiments.id', issues);
   addDuplicateIssues(data.experiments.experiments.flatMap((experiment) => experiment.attempts.map((attempt) => attempt.id)), 'experimentAttempts.id', issues);
   addDuplicateIssues(data.applications.applications.map((application) => application.id), 'applications.id', issues);
+  addDuplicateIssues(data.journey.budget.savingTransactions.map((transaction) => transaction.id), 'budget.savingTransactions.id', issues);
 
   for (const phase of data.journey.phases) {
     if (!phase.id) issues.push({ severity: 'error', path: 'phases', message: 'Phase is missing an ID.' });

@@ -256,5 +256,19 @@ export async function importMigrationData(
   }));
   if (!(await upsert('budget_items', budgetItems))) return { success: false, userId, insertedOrUpdated: count, errors };
 
+  // Old local storage has only a mutable `currentSavings` total. It has no
+  // transaction history, so this array is empty for legacy snapshots. Only
+  // explicit ledger records are written; no synthetic opening balance is made.
+  const savingTransactions = data.journey.budget.savingTransactions.map((transaction) => ({
+    id: transaction.id,
+    user_id: userId,
+    amount: transaction.amount,
+    note: transaction.note,
+    occurred_at: transaction.occurredAt,
+  }));
+  if (!(await upsert('saving_transactions', savingTransactions))) {
+    return { success: false, userId, insertedOrUpdated: count, errors };
+  }
+
   return { success: errors.length === 0, userId, insertedOrUpdated: count, errors };
 }
