@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, CheckCircle2, Cloud, Database, Loader2, ShieldCheck, XCircle } from 'lucide-react';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabaseClient';
@@ -8,6 +8,7 @@ import { buildMigrationPreview } from '@/lib/migration/validator';
 import { importMigrationData } from '@/lib/migration/importer';
 import { verifyMigration, type MigrationVerificationResult } from '@/lib/migration/verifier';
 import { normalizeLocalSnapshot, readLocalStorageSnapshot, type NormalizedMigrationData } from '@/lib/migration/normalizer';
+import { MIGRATION_STATUS_VERSION, clearVerifiedMigrationStatus, fingerprintMigrationSnapshot, readVerifiedMigrationStatus, saveVerifiedMigrationStatus } from '@/lib/migration/status';
 
 type Preview = ReturnType<typeof buildMigrationPreview>;
 
@@ -55,21 +56,63 @@ export default function MigrationPage() {
   const [importState, setImportState] = useState<ImportState>('idle');
   const [importError, setImportError] = useState<string | null>(null);
   const [verification, setVerification] = useState<MigrationVerificationResult | null>(null);
+  const [checkingPersistedVerification, setCheckingPersistedVerification] = useState(false);
+  const [statusNotice, setStatusNotice] = useState<string | null>(null);
+  const scanRun = useRef(0);
 
   const scan = () => {
+    const run = ++scanRun.current;
     setScanning(true);
     setImportError(null);
     setVerification(null);
+    setStatusNotice(null);
+    setImportState('idle');
     try {
       const snapshot = readLocalStorageSnapshot();
       const normalized = normalizeLocalSnapshot(snapshot);
       setData(normalized);
       setHasLocalData(Boolean(snapshot.journey || snapshot.experiments || snapshot.applications));
       setPreview(buildMigrationPreview(normalized));
+      void restoreVerifiedStatus(normalized, run);
     } finally {
       setScanning(false);
     }
   };
+
+  async function restoreVerifiedStatus(normalized: NormalizedMigrationData, run: number) {
+    setCheckingPersistedVerification(true);
+    try {
+      const supabase = getSupabaseClient();
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user || run !== scanRun.current) return;
+
+      const fingerprint = await fingerprintMigrationSnapshot(normalized);
+      if (run !== scanRun.current) return;
+      const stored = readVerifiedMigrationStatus(window.localStorage, authData.user.id);
+      if (!stored) return;
+      if (stored.snapshotFingerprint !== fingerprint) {
+        clearVerifiedMigrationStatus(window.localStorage, authData.user.id);
+        setStatusNotice('Your local snapshot changed since the last verified migration. Review and import the new snapshot when ready.');
+        return;
+      }
+
+      const verified = await verifyMigration(supabase, normalized);
+      if (run !== scanRun.current) return;
+      if (verified.verified) {
+        setVerification(verified);
+        setImportState('success');
+      } else {
+        clearVerifiedMigrationStatus(window.localStorage, authData.user.id);
+        setStatusNotice('The previous cloud verification no longer matches this snapshot. Your local data is unchanged; review and re-import when ready.');
+      }
+    } catch {
+      if (run === scanRun.current) {
+        setStatusNotice('Could not re-check the saved migration status. Your local data is unchanged; retry when the cloud connection is available.');
+      }
+    } finally {
+      if (run === scanRun.current) setCheckingPersistedVerification(false);
+    }
+  }
 
   useEffect(() => {
     scan();
@@ -116,6 +159,15 @@ export default function MigrationPage() {
         throw new Error(verified.errors.join('\n') || 'Cloud verification failed. You can safely retry the import.');
       }
 
+      const fingerprint = await fingerprintMigrationSnapshot(data);
+      if (!result.userId) throw new Error('Cloud import succeeded but did not return the authenticated user identity. Local data was not changed.');
+      saveVerifiedMigrationStatus(window.localStorage, {
+        version: MIGRATION_STATUS_VERSION,
+        userId: result.userId,
+        snapshotFingerprint: fingerprint,
+        verifiedAt: new Date().toISOString(),
+        verification: { expected: verified.expected, actual: verified.actual },
+      });
       setImportState('success');
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Cloud import failed.');
@@ -138,7 +190,7 @@ export default function MigrationPage() {
               <h1 className="mt-2 text-3xl font-bold">Review your local progress.</h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">K-Roadmap found the data currently stored in this browser. Import is explicit and idempotent. Your local data is never deleted by this migration.</p>
             </div>
-            <button type="button" onClick={scan} disabled={scanning || isBusy} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-2.5 text-xs font-semibold text-slate-300 transition hover:border-slate-600 hover:text-white disabled:opacity-50">
+            <button type="button" onClick={scan} disabled={scanning || isBusy || checkingPersistedVerification} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-2.5 text-xs font-semibold text-slate-300 transition hover:border-slate-600 hover:text-white disabled:opacity-50">
               {scanning ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
               {scanning ? 'Scanning...' : 'Scan again'}
             </button>
@@ -175,6 +227,14 @@ export default function MigrationPage() {
                 </div>
               )}
 
+              {checkingPersistedVerification && (
+                <div className="mt-6 flex items-center gap-2 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-4 text-xs text-indigo-200"><Loader2 size={15} className="animate-spin" /> Re-checking the saved migration status against your cloud account...</div>
+              )}
+
+              {statusNotice && (
+                <div className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-5 text-amber-200">{statusNotice}</div>
+              )}
+
               {importState === 'confirming' && (
                 <div className="mt-8 rounded-2xl border border-indigo-500/25 bg-indigo-500/5 p-5">
                   <p className="text-sm font-bold text-white">Ready to import {totalRecords} local records?</p>
@@ -186,7 +246,7 @@ export default function MigrationPage() {
                 </div>
               )}
 
-              {importState === 'idle' && preview.canImport && (
+              {importState === 'idle' && preview.canImport && !checkingPersistedVerification && (
                 <button type="button" onClick={startImport} className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-indigo-500 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-indigo-400"><Cloud size={18} /> Import {totalRecords} records to Cloud</button>
               )}
 
