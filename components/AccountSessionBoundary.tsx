@@ -11,6 +11,8 @@ import {
   EXPERIMENT_STORAGE_KEY,
   APPLICATION_STORAGE_KEY,
 } from '@/lib/accountStorage';
+import { readCloudHydrationSnapshot } from '@/lib/cloud/hydration';
+import { applyCloudHydrationSnapshot } from '@/lib/cloud/applyHydration';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useExperimentStore } from '@/store/experimentStore';
 import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
@@ -57,8 +59,6 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
         readyRef.current = false;
         setReady(false);
 
-        // Clear the previous account from memory without writing the reset
-        // values into the next account's persistence namespace.
         configureVolatileStorage();
         useJourneyStore.getState().resetData();
         useExperimentStore.getState().resetExperiments();
@@ -74,6 +74,18 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
           useApplicationTrackerStore.persist.rehydrate(),
         ]);
 
+        if (cancelledRef.current) return;
+
+        // Local account-scoped data is loaded first. If this account already
+        // has cloud data, the cloud snapshot becomes the authenticated source
+        // for this hydration pass. An empty cloud account leaves local/guest
+        // data untouched so first-time migration remains possible.
+        if (userId) {
+          const cloud = await readCloudHydrationSnapshot(supabase);
+          if (cancelledRef.current) return;
+          if (cloud.data) applyCloudHydrationSnapshot(cloud.data);
+        }
+
         syncCurrentScopeToLegacyKeys();
 
         if (cancelledRef.current) return;
@@ -87,8 +99,6 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
     });
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
-      // Keep the Supabase callback synchronous; the actual store transition is
-      // serialized outside the auth callback to avoid auth-lock contention.
       queueMicrotask(() => transition(session?.user.id ?? null));
     });
 
