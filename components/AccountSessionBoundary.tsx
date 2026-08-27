@@ -15,15 +15,15 @@ import { useJourneyStore } from '@/store/useJourneyStore';
 import { useExperimentStore } from '@/store/experimentStore';
 import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
 
-const volatileStorage = createJSONStorage(() => ({
+const volatileStorage = createJSONStorage<any>(() => ({
   getItem: () => null,
   setItem: () => undefined,
   removeItem: () => undefined,
-}));
+}))!;
 
-const journeyStorage = createJSONStorage(() => createScopedStateStorage(JOURNEY_STORAGE_KEY));
-const experimentStorage = createJSONStorage(() => createScopedStateStorage(EXPERIMENT_STORAGE_KEY));
-const applicationStorage = createJSONStorage(() => createScopedStateStorage(APPLICATION_STORAGE_KEY));
+const journeyStorage = createJSONStorage<any>(() => createScopedStateStorage(JOURNEY_STORAGE_KEY))!;
+const experimentStorage = createJSONStorage<any>(() => createScopedStateStorage(EXPERIMENT_STORAGE_KEY))!;
+const applicationStorage = createJSONStorage<any>(() => createScopedStateStorage(APPLICATION_STORAGE_KEY))!;
 
 function configureVolatileStorage() {
   useJourneyStore.persist.setOptions({ storage: volatileStorage });
