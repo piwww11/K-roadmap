@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import AccountSessionBoundary from "@/components/AccountSessionBoundary";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,10 +28,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body suppressHydrationWarning className="min-h-full bg-slate-950 text-slate-100">
-        <Sidebar />
-        <main className="min-h-screen pl-0 pt-[4.5rem] md:pl-64 md:pt-0">
-          {children}
-        </main>
+        <AccountSessionBoundary>
+          <Sidebar />
+          <main className="min-h-screen pl-0 pt-[4.5rem] md:pl-64 md:pt-0">
+            {children}
+          </main>
+        </AccountSessionBoundary>
       </body>
     </html>
   );

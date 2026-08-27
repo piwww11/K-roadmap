@@ -6,6 +6,12 @@ import { motion } from 'framer-motion';
 
 export default function RoadmapPage() {
   const { phases, toggleTask } = useJourneyStore();
+  const orderedPhases = [...phases].sort((a, b) => {
+    const numberA = Number.isFinite(a.number) ? a.number : Number.MAX_SAFE_INTEGER;
+    const numberB = Number.isFinite(b.number) ? b.number : Number.MAX_SAFE_INTEGER;
+    if (numberA !== numberB) return numberA - numberB;
+    return a.startDate.localeCompare(b.startDate);
+  });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans">
@@ -17,7 +23,7 @@ export default function RoadmapPage() {
       <div className="max-w-4xl mx-auto relative">
         <div className="absolute left-4 md:left-8 top-4 bottom-0 w-0.5 bg-gradient-to-b from-indigo-500/40 via-slate-800 to-transparent rounded-full" />
         <div className="space-y-12">
-          {phases.map((phase, index) => {
+          {orderedPhases.map((phase, index) => {
             const tasks = phase.months.flatMap((month) => month.goals.flatMap((goal) => goal.tasks));
             const completedTasks = tasks.filter((task) => task.status === 'Completed').length;
             const totalTasks = tasks.length;
