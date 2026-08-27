@@ -4,7 +4,7 @@ import type { CloudHydrationSnapshot } from './hydration';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useExperimentStore } from '@/store/experimentStore';
 import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
-import type { Budget, Experiment } from '@/types';
+import type { Budget, BudgetItem, Experiment } from '@/types';
 import type { ApplicationTarget } from '@/types/application';
 
 function payload<T>(row: Record<string, unknown>): T | null {
@@ -20,6 +20,24 @@ function sumSavings(snapshot: CloudHydrationSnapshot): number {
     const amount = Number(row.amount);
     return Number.isFinite(amount) ? total + amount : total;
   }, 0);
+}
+
+function normalizeBudgetItems(snapshot: CloudHydrationSnapshot, fallback: BudgetItem[]): BudgetItem[] {
+  const hydrated = rows<Record<string, unknown>>(snapshot, 'budget_items')
+    .map((row) => payload<Record<string, unknown>>(row))
+    .filter((value): value is Record<string, unknown> => value !== null)
+    .map((item, index): BudgetItem | null => {
+      const id = typeof item.id === 'string' && item.id.trim() ? item.id : `cloud-budget-${index}`;
+      const name = typeof item.name === 'string' ? item.name : null;
+      const amount = Number(item.amount);
+      const category = item.category;
+
+      if (!name || !Number.isFinite(amount) || typeof category !== 'string') return null;
+      return { id, name, amount, category } as BudgetItem;
+    })
+    .filter((value): value is BudgetItem => value !== null);
+
+  return hydrated.length ? hydrated : fallback;
 }
 
 export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
@@ -41,10 +59,10 @@ export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
       skills: rows<Record<string, unknown>>(snapshot, 'skills').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
       journalEntries: rows<Record<string, unknown>>(snapshot, 'journal_entries').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
       budget: {
-        items: rows<Record<string, unknown>>(snapshot, 'budget_items').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
+        items: normalizeBudgetItems(snapshot, state.budget.items),
         targetAmount: Number((snapshot.budget_profiles?.[0] as Record<string, unknown> | undefined)?.target_amount ?? state.budget.targetAmount),
         currentSavings: sumSavings(snapshot),
-      } as Budget,
+      } satisfies Budget,
       documents: rows<Record<string, unknown>>(snapshot, 'documents').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
       achievements: rows<Record<string, unknown>>(snapshot, 'achievements').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
       majorDecisions: rows<Record<string, unknown>>(snapshot, 'major_decisions').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
