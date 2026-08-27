@@ -11,6 +11,24 @@ import { normalizeLocalSnapshot, type NormalizedMigrationData } from '@/lib/migr
 const SYNC_DEBOUNCE_MS = 900;
 const DELETE_BATCH_SIZE = 50;
 
+type DeletableTable =
+  | 'journey_phases'
+  | 'journey_months'
+  | 'journey_goals'
+  | 'journey_tasks'
+  | 'majors'
+  | 'skills'
+  | 'journal_entries'
+  | 'documents'
+  | 'achievements'
+  | 'major_decisions'
+  | 'experiments'
+  | 'experiment_attempts'
+  | 'experiment_reflections'
+  | 'applications'
+  | 'budget_items'
+  | 'saving_transactions';
+
 // Children must be removed before their parent rows. This keeps local
 // deletions safe against the foreign keys used by the cloud schema.
 const DELETE_ORDER: DeletableTable[] = [
@@ -31,24 +49,6 @@ const DELETE_ORDER: DeletableTable[] = [
   'skills',
   'majors',
 ];
-
-type DeletableTable =
-  | 'journey_phases'
-  | 'journey_months'
-  | 'journey_goals'
-  | 'journey_tasks'
-  | 'majors'
-  | 'skills'
-  | 'journal_entries'
-  | 'documents'
-  | 'achievements'
-  | 'major_decisions'
-  | 'experiments'
-  | 'experiment_attempts'
-  | 'experiment_reflections'
-  | 'applications'
-  | 'budget_items'
-  | 'saving_transactions';
 
 type ApplicationDocumentKey = `${string}::${string}`;
 
