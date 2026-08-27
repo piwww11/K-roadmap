@@ -4,7 +4,8 @@ import type { CloudHydrationSnapshot } from './hydration';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useExperimentStore } from '@/store/experimentStore';
 import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
-import type { Budget, Experiment, Application } from '@/types';
+import type { Budget, Experiment } from '@/types';
+import type { ApplicationTarget } from '@/types/application';
 
 function payload<T>(row: Record<string, unknown>): T | null {
   return row.payload && typeof row.payload === 'object' ? (row.payload as T) : null;
@@ -21,20 +22,14 @@ function sumSavings(snapshot: CloudHydrationSnapshot): number {
   }, 0);
 }
 
-/**
- * Applies a verified cloud snapshot to the existing account-scoped local
- * stores. This is cloud -> local only; it never writes to Supabase.
- */
 export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
   applied: boolean;
   records: number;
 } {
   const phaseRows = rows<Record<string, unknown>>(snapshot, 'journey_phases');
   const majorRows = rows<Record<string, unknown>>(snapshot, 'majors');
-
   const phases = phaseRows.map((row) => payload<Record<string, unknown>>(row)).filter(Boolean);
   const majors = majorRows.map((row) => payload<Record<string, unknown>>(row)).filter(Boolean);
-
   let records = 0;
 
   if (phases.length && majors.length) {
@@ -49,7 +44,7 @@ export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
         items: rows<Record<string, unknown>>(snapshot, 'budget_items').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
         targetAmount: Number((snapshot.budget_profiles?.[0] as Record<string, unknown> | undefined)?.target_amount ?? state.budget.targetAmount),
         currentSavings: sumSavings(snapshot),
-      } satisfies Budget,
+      } as Budget,
       documents: rows<Record<string, unknown>>(snapshot, 'documents').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
       achievements: rows<Record<string, unknown>>(snapshot, 'achievements').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
       majorDecisions: rows<Record<string, unknown>>(snapshot, 'major_decisions').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
@@ -72,8 +67,8 @@ export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
   }
 
   const applications = rows<Record<string, unknown>>(snapshot, 'applications')
-    .map((row) => payload<Application>(row))
-    .filter((value): value is Application => value !== null);
+    .map((row) => payload<ApplicationTarget>(row))
+    .filter((value): value is ApplicationTarget => value !== null);
   if (applications.length) {
     useApplicationTrackerStore.setState({ applications });
     records += applications.length;
