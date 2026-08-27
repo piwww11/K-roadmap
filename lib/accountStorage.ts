@@ -95,6 +95,23 @@ export function activateAccountScope(userId: string | null): boolean {
   return true;
 }
 
+/**
+ * Keeps the old migration reader keys as a compatibility mirror of the
+ * currently active scope. This prevents migration code written for the
+ * legacy keys from ever reading another account's snapshot.
+ */
+export function syncCurrentScopeToLegacyKeys() {
+  if (typeof window === 'undefined') return;
+  const storage = window.localStorage;
+
+  for (const baseKey of [JOURNEY_STORAGE_KEY, EXPERIMENT_STORAGE_KEY, APPLICATION_STORAGE_KEY]) {
+    const scopedKey = getScopedStorageKey(baseKey);
+    const value = storage.getItem(scopedKey);
+    if (value === null) storage.removeItem(baseKey);
+    else storage.setItem(baseKey, value);
+  }
+}
+
 export function createScopedStateStorage(baseKey: string) {
   return {
     getItem: (name: string) => window.localStorage.getItem(getScopedStorageKey(name || baseKey)),
