@@ -78,8 +78,8 @@ export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
     cloudExport.documents.length > 0 ||
     cloudExport.achievements.length > 0 ||
     cloudExport.majorDecisions.length > 0 ||
-    snapshot.budget_profiles?.length > 0 ||
-    snapshot.saving_transactions?.length > 0;
+    Boolean(snapshot.budget_profiles?.length) ||
+    Boolean(snapshot.saving_transactions?.length);
 
   if (hasJourneyData && state.importData(JSON.stringify(cloudExport))) {
     records += phases.length + majors.length;
