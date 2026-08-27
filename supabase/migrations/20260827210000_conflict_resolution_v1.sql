@@ -1,15 +1,8 @@
 -- Conflict Resolution v1
---
--- Adds per-row revisions and tombstones to syncable user-owned entities,
--- plus an append-only mutation feed. This migration does NOT change the
--- application write path by itself; the client must stop issuing hard DELETEs
--- and use tombstone updates in the Phase 4 repository.
+-- Adds per-row revisions/tombstones and an append-only mutation feed.
+-- This migration intentionally does not alter the client write path yet.
 
 begin;
-
--- ---------------------------------------------------------------------------
--- 1. Per-row sync metadata
--- ---------------------------------------------------------------------------
 
 alter table public.achievements add column if not exists revision bigint not null default 1, add column if not exists deleted_at timestamptz;
 alter table public.application_documents add column if not exists revision bigint not null default 1, add column if not exists deleted_at timestamptz;
@@ -33,10 +26,6 @@ alter table public.skills add column if not exists revision bigint not null defa
 
 -- budget_summary is derived data and is intentionally not a sync entity.
 
--- ---------------------------------------------------------------------------
--- 2. Append-only change feed
--- ---------------------------------------------------------------------------
-
 create table if not exists public.sync_mutations (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null,
@@ -51,10 +40,6 @@ create table if not exists public.sync_mutations (
 create index if not exists sync_mutations_user_created_idx on public.sync_mutations (user_id, created_at, id);
 create index if not exists sync_mutations_user_revision_idx on public.sync_mutations (user_id, revision, created_at, id);
 
--- ---------------------------------------------------------------------------
--- 3. Revision trigger
--- ---------------------------------------------------------------------------
-
 create or replace function public.bump_sync_revision()
 returns trigger
 language plpgsql
@@ -65,8 +50,7 @@ begin
     return new;
   end if;
 
-  -- The importer uses upsert. Do not create a new revision for an identical
-  -- logical row, otherwise every automatic-sync retry becomes a fake change.
+  -- The importer uses upsert. Identical logical rows must not consume a new revision.
   if (to_jsonb(new) - array['revision', 'updated_at']) is not distinct from
      (to_jsonb(old) - array['revision', 'updated_at']) then
     new.revision := old.revision;
@@ -84,10 +68,6 @@ begin
 end;
 $$;
 
--- ---------------------------------------------------------------------------
--- 4. Mutation-feed trigger
--- ---------------------------------------------------------------------------
-
 create or replace function public.record_sync_mutation()
 returns trigger
 language plpgsql
@@ -100,7 +80,6 @@ declare
   mutation_revision bigint;
   mutation_operation text;
 begin
-  -- profiles is keyed by `id`, while all other sync entities use user_id.
   if tg_table_name = 'profiles' then
     mutation_user_id := coalesce(new.id, old.id);
     mutation_row_key := coalesce(new.id, old.id);
@@ -132,9 +111,8 @@ begin
 end;
 $$;
 
--- ---------------------------------------------------------------------------
--- 5. Triggers
--- ---------------------------------------------------------------------------
+-- Only triggers may write the mutation feed.
+revoke execute on function public.record_sync_mutation() from public, anon, authenticated;
 
 DO $$
 declare
@@ -142,10 +120,10 @@ declare
 begin
   foreach table_name in array array[
     'achievements', 'application_documents', 'applications', 'budget_items',
-    'budget_profiles', 'documents', 'experiment_attempts',
-    'experiment_reflections', 'experiments', 'journal_entries', 'journey_goals',
-    'journey_months', 'journey_phases', 'journey_tasks', 'major_decisions',
-    'majors', 'profiles', 'saving_transactions', 'skills'
+    'budget_profiles', 'documents', 'experiment_attempts', 'experiment_reflections',
+    'experiments', 'journal_entries', 'journey_goals', 'journey_months',
+    'journey_phases', 'journey_tasks', 'major_decisions', 'majors', 'profiles',
+    'saving_transactions', 'skills'
   ] loop
     execute format('drop trigger if exists %I on public.%I', table_name || '_bump_sync_revision', table_name);
     execute format('create trigger %I before insert or update on public.%I for each row execute function public.bump_sync_revision()', table_name || '_bump_sync_revision', table_name);
@@ -153,10 +131,6 @@ begin
     execute format('create trigger %I after insert or update or delete on public.%I for each row execute function public.record_sync_mutation()', table_name || '_record_sync_mutation', table_name);
   end loop;
 end $$;
-
--- ---------------------------------------------------------------------------
--- 6. Incremental-sync indexes
--- ---------------------------------------------------------------------------
 
 create index if not exists achievements_sync_idx on public.achievements (user_id, revision);
 create index if not exists application_documents_sync_idx on public.application_documents (user_id, revision);
@@ -178,13 +152,10 @@ create index if not exists profiles_sync_idx on public.profiles (id, revision);
 create index if not exists saving_transactions_sync_idx on public.saving_transactions (user_id, revision);
 create index if not exists skills_sync_idx on public.skills (user_id, revision);
 
--- ---------------------------------------------------------------------------
--- 7. Mutation-feed RLS
--- ---------------------------------------------------------------------------
-
 alter table public.sync_mutations enable row level security;
 revoke all on public.sync_mutations from anon;
 revoke all on public.sync_mutations from authenticated;
+grant select on public.sync_mutations to authenticated;
 
 drop policy if exists sync_mutations_select_own on public.sync_mutations;
 create policy sync_mutations_select_own on public.sync_mutations
