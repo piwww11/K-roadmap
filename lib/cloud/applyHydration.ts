@@ -48,32 +48,44 @@ export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
   const majorRows = rows<Record<string, unknown>>(snapshot, 'majors');
   const phases = phaseRows.map((row) => payload<Record<string, unknown>>(row)).filter(Boolean);
   const majors = majorRows.map((row) => payload<Record<string, unknown>>(row)).filter(Boolean);
+  const state = useJourneyStore.getState();
   let records = 0;
 
-  if (phases.length && majors.length) {
-    const state = useJourneyStore.getState();
-    const cloudExport = {
-      myWhy: state.myWhy,
-      phases,
-      majors,
-      skills: rows<Record<string, unknown>>(snapshot, 'skills').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
-      journalEntries: rows<Record<string, unknown>>(snapshot, 'journal_entries').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
-      budget: {
-        items: normalizeBudgetItems(snapshot, state.budget.items),
-        targetAmount: Number((snapshot.budget_profiles?.[0] as Record<string, unknown> | undefined)?.target_amount ?? state.budget.targetAmount),
-        currentSavings: sumSavings(snapshot),
-      } satisfies Budget,
-      documents: rows<Record<string, unknown>>(snapshot, 'documents').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
-      achievements: rows<Record<string, unknown>>(snapshot, 'achievements').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
-      majorDecisions: rows<Record<string, unknown>>(snapshot, 'major_decisions').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
-    };
+  // Journey data is hydrated independently per collection. An empty cloud
+  // collection must not block unrelated cloud data from being applied.
+  const cloudExport = {
+    myWhy: state.myWhy,
+    phases: phases.length ? phases : state.phases,
+    majors: majors.length ? majors : state.majors,
+    skills: rows<Record<string, unknown>>(snapshot, 'skills').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
+    journalEntries: rows<Record<string, unknown>>(snapshot, 'journal_entries').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
+    budget: {
+      items: normalizeBudgetItems(snapshot, state.budget.items),
+      targetAmount: Number((snapshot.budget_profiles?.[0] as Record<string, unknown> | undefined)?.target_amount ?? state.budget.targetAmount),
+      currentSavings: sumSavings(snapshot),
+    } satisfies Budget,
+    documents: rows<Record<string, unknown>>(snapshot, 'documents').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
+    achievements: rows<Record<string, unknown>>(snapshot, 'achievements').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
+    majorDecisions: rows<Record<string, unknown>>(snapshot, 'major_decisions').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
+  };
 
-    if (state.importData(JSON.stringify(cloudExport))) {
-      records += phases.length + majors.length;
-      records += cloudExport.skills.length + cloudExport.journalEntries.length;
-      records += cloudExport.budget.items.length + cloudExport.documents.length;
-      records += cloudExport.achievements.length + cloudExport.majorDecisions.length;
-    }
+  const hasJourneyData =
+    phases.length > 0 ||
+    majors.length > 0 ||
+    cloudExport.skills.length > 0 ||
+    cloudExport.journalEntries.length > 0 ||
+    cloudExport.budget.items.length > 0 ||
+    cloudExport.documents.length > 0 ||
+    cloudExport.achievements.length > 0 ||
+    cloudExport.majorDecisions.length > 0 ||
+    snapshot.budget_profiles?.length > 0 ||
+    snapshot.saving_transactions?.length > 0;
+
+  if (hasJourneyData && state.importData(JSON.stringify(cloudExport))) {
+    records += phases.length + majors.length;
+    records += cloudExport.skills.length + cloudExport.journalEntries.length;
+    records += cloudExport.budget.items.length + cloudExport.documents.length;
+    records += cloudExport.achievements.length + cloudExport.majorDecisions.length;
   }
 
   const experiments = rows<Record<string, unknown>>(snapshot, 'experiments')
