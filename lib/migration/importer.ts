@@ -3,12 +3,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { MajorDecisionResponse, Skill } from '@/types';
 import type { NormalizedMigrationData } from './normalizer';
+import type { CloudHydrationSnapshot } from '@/lib/cloud/hydration';
+import { CloudRepository, type CloudTable } from '@/lib/cloud/cloudRepository';
+import { resolveRowConflict, revisionOf } from '@/lib/cloud/conflictResolution';
 
 export interface MigrationImportResult {
   success: boolean;
   userId?: string;
   insertedOrUpdated: number;
   errors: string[];
+}
+
+export interface MigrationImportOptions {
+  /** Last cloud snapshot known by this device. Enables optimistic concurrency. */
+  expectedSnapshot?: CloudHydrationSnapshot | null;
 }
 
 function isoOrNull(value: unknown): string | null {
@@ -31,12 +39,50 @@ function reflectionId(experimentId: string, attemptId?: string) {
   return attemptId ? `${attemptId}:reflection` : `${experimentId}:reflection`;
 }
 
+const PRIMARY_KEYS: Partial<Record<CloudTable, readonly string[]>> = {
+  profiles: ['id'],
+  journey_phases: ['id'],
+  journey_months: ['id'],
+  journey_goals: ['id'],
+  journey_tasks: ['id'],
+  majors: ['id'],
+  skills: ['id'],
+  journal_entries: ['id'],
+  documents: ['id'],
+  achievements: ['id'],
+  major_decisions: ['id'],
+  experiments: ['id'],
+  experiment_attempts: ['id'],
+  experiment_reflections: ['id'],
+  applications: ['id'],
+  application_documents: ['application_id', 'document_id'],
+  budget_profiles: ['user_id'],
+  budget_items: ['id'],
+  saving_transactions: ['id'],
+};
+
+function sameKey(table: CloudTable, left: Record<string, unknown>, right: Record<string, unknown>) {
+  return (PRIMARY_KEYS[table] ?? ['id']).every((key) => left[key] === right[key]);
+}
+
+function baselineRow(
+  snapshot: CloudHydrationSnapshot | null | undefined,
+  table: CloudTable,
+  row: Record<string, unknown>,
+) {
+  const rows = snapshot?.[table] ?? [];
+  return rows.find((candidate) => sameKey(table, candidate, row)) ?? null;
+}
+
 export async function importMigrationData(
   supabase: SupabaseClient,
   data: NormalizedMigrationData,
+  options: MigrationImportOptions = {},
 ): Promise<MigrationImportResult> {
   const errors: string[] = [];
   let count = 0;
+  const repository = new CloudRepository(supabase);
+  const revisionAware = options.expectedSnapshot !== undefined;
 
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError || !authData.user) {
@@ -47,14 +93,54 @@ export async function importMigrationData(
   const majorIds = new Set(data.journey.majors.map((major) => major.id));
   const documentIds = new Set(data.journey.documents.map((document) => document.id));
 
-  async function upsert(table: string, rows: Record<string, unknown>[]) {
+  async function upsert(table: CloudTable, rows: Record<string, unknown>[]) {
     if (!rows.length) return true;
-    const { error } = await supabase.from(table).upsert(rows, { onConflict: 'id' });
-    if (error) {
-      errors.push(`${table}: ${error.message}`);
-      return false;
+
+    // Migration keeps its original bulk-upsert behavior. Automatic sync opts
+    // into the safer row-level compare-and-swap path below.
+    if (!revisionAware) {
+      const { error } = await supabase.from(table).upsert(rows, { onConflict: (PRIMARY_KEYS[table] ?? ['id']).join(',') });
+      if (error) {
+        errors.push(`${table}: ${error.message}`);
+        return false;
+      }
+      count += rows.length;
+      return true;
     }
-    count += rows.length;
+
+    for (const row of rows) {
+      const base = baselineRow(options.expectedSnapshot, table, row);
+      const expectedRevision = revisionOf(base);
+      const result = await repository.upsertWithRevision(table, row, expectedRevision);
+
+      if (!result.error && !result.conflict) {
+        count += 1;
+        continue;
+      }
+
+      if (result.error) {
+        errors.push(`${table}: ${result.error}`);
+        continue;
+      }
+
+      if (!result.data || !base) {
+        errors.push(`${table}: conflict for ${JSON.stringify(row.id ?? row)}; no safe baseline is available.`);
+        continue;
+      }
+
+      const merged = resolveRowConflict(base, row, result.data);
+      const retry = await repository.upsertWithRevision(table, merged.row, revisionOf(result.data));
+      if (retry.error) {
+        errors.push(`${table}: ${retry.error}`);
+        continue;
+      }
+      if (retry.conflict || !retry.data) {
+        errors.push(`${table}: conflict remained after three-way merge.`);
+        continue;
+      }
+      count += 1;
+    }
+
     return true;
   }
 
@@ -62,11 +148,7 @@ export async function importMigrationData(
     id: userId,
     display_name: authData.user.user_metadata?.full_name ?? authData.user.email ?? null,
   };
-  {
-    const { error } = await supabase.from('profiles').upsert(profile, { onConflict: 'id' });
-    if (error) errors.push(`profiles: ${error.message}`);
-    else count += 1;
-  }
+  if (!(await upsert('profiles', [profile]))) return { success: false, userId, insertedOrUpdated: count, errors };
 
   const majors = data.journey.majors.map((major) => ({
     id: major.id,
@@ -92,7 +174,7 @@ export async function importMigrationData(
   const months = data.journey.phases.flatMap((phase) => phase.months.map((month) => ({
     id: month.id,
     user_id: userId,
-    phase_id: month.phaseId,
+    phase_id: phase.id,
     month_number: month.year,
     title: month.name,
     payload: toPayload(month),
@@ -102,7 +184,7 @@ export async function importMigrationData(
   const goals = data.journey.phases.flatMap((phase) => phase.months.flatMap((month) => month.goals.map((goal) => ({
     id: goal.id,
     user_id: userId,
-    month_id: goal.monthId,
+    month_id: month.id,
     title: goal.title,
     payload: toPayload(goal),
   }))));
@@ -114,7 +196,7 @@ export async function importMigrationData(
         goal.tasks.map((task) => ({
           id: task.id,
           user_id: userId,
-          goal_id: task.goalId,
+          goal_id: goal.id,
           status: task.status,
           major_reward: task.majorReward ?? null,
           exploration_major_ids: task.explorationMajorIds ?? [],
@@ -234,20 +316,15 @@ export async function importMigrationData(
       application_id: application.id, document_id: documentId, user_id: userId,
     }));
   });
-  if (applicationDocuments.length) {
-    const { error } = await supabase.from('application_documents').upsert(applicationDocuments, { onConflict: 'application_id,document_id' });
-    if (error) errors.push(`application_documents: ${error.message}`);
-    else count += applicationDocuments.length;
-  }
+  if (!(await upsert('application_documents', applicationDocuments))) return { success: false, userId, insertedOrUpdated: count, errors };
 
   {
-    const { error } = await supabase.from('budget_profiles').upsert({
+    const budgetProfile = {
       user_id: userId,
       target_amount: data.journey.budget.targetAmount,
       payload: { legacyCurrentSavings: data.journey.budget.legacyCurrentSavings },
-    }, { onConflict: 'user_id' });
-    if (error) errors.push(`budget_profiles: ${error.message}`);
-    else count += 1;
+    };
+    if (!(await upsert('budget_profiles', [budgetProfile]))) return { success: false, userId, insertedOrUpdated: count, errors };
   }
 
   const budgetItems = data.journey.budget.items.map((item) => ({
@@ -256,9 +333,6 @@ export async function importMigrationData(
   }));
   if (!(await upsert('budget_items', budgetItems))) return { success: false, userId, insertedOrUpdated: count, errors };
 
-  // Old local storage has only a mutable `currentSavings` total. It has no
-  // transaction history, so this array is empty for legacy snapshots. Only
-  // explicit ledger records are written; no synthetic opening balance is made.
   const savingTransactions = data.journey.budget.savingTransactions.map((transaction) => ({
     id: transaction.id,
     user_id: userId,
