@@ -5,32 +5,18 @@ import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
 import { useExperimentStore } from '@/store/experimentStore';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import type { CloudHydrationSnapshot } from './hydration';
+import { readCloudHydrationSnapshot } from './hydration';
+import { applyCloudHydrationSnapshot } from './applyHydration';
+import { CloudRepository, type CloudTable } from './cloudRepository';
 import { importMigrationData } from '@/lib/migration/importer';
 import { normalizeLocalSnapshot, type NormalizedMigrationData } from '@/lib/migration/normalizer';
 
 const SYNC_DEBOUNCE_MS = 900;
-const DELETE_BATCH_SIZE = 50;
 
-type DeletableTable =
-  | 'journey_phases'
-  | 'journey_months'
-  | 'journey_goals'
-  | 'journey_tasks'
-  | 'majors'
-  | 'skills'
-  | 'journal_entries'
-  | 'documents'
-  | 'achievements'
-  | 'major_decisions'
-  | 'experiments'
-  | 'experiment_attempts'
-  | 'experiment_reflections'
-  | 'applications'
-  | 'budget_items'
-  | 'saving_transactions';
+type DeletableTable = Exclude<CloudTable, 'profiles' | 'application_documents' | 'budget_profiles'>;
+type ApplicationDocumentKey = `${string}::${string}`;
+type SyncedIds = Map<DeletableTable, Set<string>>;
 
-// Children must be removed before their parent rows. This keeps local
-// deletions safe against the foreign keys used by the cloud schema.
 const DELETE_ORDER: DeletableTable[] = [
   'experiment_reflections',
   'experiment_attempts',
@@ -50,10 +36,6 @@ const DELETE_ORDER: DeletableTable[] = [
   'majors',
 ];
 
-type ApplicationDocumentKey = `${string}::${string}`;
-
-type SyncedIds = Map<DeletableTable, Set<string>>;
-
 function emptySyncedIds(): SyncedIds {
   return new Map();
 }
@@ -63,11 +45,7 @@ function buildLocalSnapshot(): NormalizedMigrationData {
   const experiments = { state: { experiments: useExperimentStore.getState().experiments } };
   const applications = { state: { applications: useApplicationTrackerStore.getState().applications } };
 
-  return normalizeLocalSnapshot({
-    journey,
-    experiments,
-    applications,
-  });
+  return normalizeLocalSnapshot({ journey, experiments, applications });
 }
 
 function desiredIds(data: NormalizedMigrationData): SyncedIds {
@@ -109,88 +87,121 @@ function desiredApplicationDocuments(data: NormalizedMigrationData): Set<Applica
       if (documentIds.has(documentId)) keys.add(`${application.id}::${documentId}`);
     }
   }
-
   return keys;
 }
 
 function seedSyncedIds(snapshot: CloudHydrationSnapshot | null | undefined): SyncedIds {
   const ids = emptySyncedIds();
   if (!snapshot) return ids;
-
-  const seed = (table: DeletableTable) => {
-    const values = snapshot[table] ?? [];
-    ids.set(table, new Set(values.map((row) => String(row.id)).filter(Boolean)));
-  };
-
-  seed('journey_phases');
-  seed('journey_months');
-  seed('journey_goals');
-  seed('journey_tasks');
-  seed('majors');
-  seed('skills');
-  seed('journal_entries');
-  seed('documents');
-  seed('achievements');
-  seed('major_decisions');
-  seed('experiments');
-  seed('experiment_attempts');
-  seed('experiment_reflections');
-  seed('applications');
-  seed('budget_items');
-  seed('saving_transactions');
-
+  for (const table of DELETE_ORDER) {
+    ids.set(table, new Set((snapshot[table] ?? []).map((row) => String(row.id)).filter(Boolean)));
+  }
   return ids;
 }
 
-async function deleteStaleRows(
-  supabase: SupabaseClient,
+function seedApplicationDocuments(snapshot: CloudHydrationSnapshot | null | undefined) {
+  return new Set<ApplicationDocumentKey>(
+    (snapshot?.application_documents ?? []).map(
+      (row) => `${String(row.application_id)}::${String(row.document_id)}` as ApplicationDocumentKey,
+    ),
+  );
+}
+
+function findBaselineRow(
+  snapshot: CloudHydrationSnapshot,
+  table: CloudTable,
+  key: Record<string, unknown>,
+) {
+  const keys = table === 'application_documents'
+    ? ['application_id', 'document_id']
+    : table === 'budget_profiles'
+      ? ['user_id']
+      : ['id'];
+  return (snapshot[table] ?? []).find((row) => keys.every((column) => row[column] === key[column])) ?? null;
+}
+
+async function tombstoneStaleRows(
+  repository: CloudRepository,
   userId: string,
-  previous: SyncedIds,
+  baseline: CloudHydrationSnapshot,
   desired: SyncedIds,
 ): Promise<{ ok: boolean; errors: string[] }> {
   const errors: string[] = [];
 
   for (const table of DELETE_ORDER) {
-    const previousIds = previous.get(table);
-    if (!previousIds) continue;
-
+    const rows = baseline[table] ?? [];
     const desiredSet = desired.get(table) ?? new Set<string>();
-    const staleIds = [...previousIds].filter((id) => !desiredSet.has(id));
+    const staleRows = rows.filter((row) => {
+      const id = String(row.id ?? '');
+      return id && !desiredSet.has(id) && row.user_id === userId;
+    });
 
-    for (let index = 0; index < staleIds.length; index += DELETE_BATCH_SIZE) {
-      const batch = staleIds.slice(index, index + DELETE_BATCH_SIZE);
-      const { error } = await supabase
-        .from(table)
-        .delete()
-        .eq('user_id', userId)
-        .in('id', batch);
-      if (error) errors.push(`${table}: ${error.message}`);
+    for (const row of staleRows) {
+      const revision = typeof row.revision === 'number' ? row.revision : null;
+      if (revision === null) {
+        errors.push(`${table}:${String(row.id)}: missing revision baseline.`);
+        continue;
+      }
+
+      const result = await repository.tombstone(table, { id: row.id, user_id: userId }, revision);
+      if (!result.error && !result.conflict) continue;
+      if (result.error) {
+        errors.push(`${table}:${String(row.id)}: ${result.error}`);
+        continue;
+      }
+
+      // Delete-vs-update is resolved in v1 by the explicit local deletion.
+      const latest = await repository.getByKey<Record<string, unknown>>(table, { id: row.id, user_id: userId });
+      const latestRevision = typeof latest.data?.revision === 'number' ? latest.data.revision : null;
+      if (latest.error || latestRevision === null) {
+        errors.push(`${table}:${String(row.id)}: could not rebase tombstone after conflict.`);
+        continue;
+      }
+      const retry = await repository.tombstone(table, { id: row.id, user_id: userId }, latestRevision);
+      if (retry.error || retry.conflict) errors.push(`${table}:${String(row.id)}: tombstone conflict remained.`);
     }
   }
 
   return { ok: errors.length === 0, errors };
 }
 
-async function deleteStaleApplicationDocuments(
-  supabase: SupabaseClient,
+async function tombstoneStaleApplicationDocuments(
+  repository: CloudRepository,
   userId: string,
-  previous: Set<ApplicationDocumentKey>,
+  baseline: CloudHydrationSnapshot,
   desired: Set<ApplicationDocumentKey>,
 ): Promise<string[]> {
   const errors: string[] = [];
-  const stale = [...previous].filter((key) => !desired.has(key));
+  const rows = baseline.application_documents ?? [];
 
-  for (const key of stale) {
-    const [applicationId, documentId] = key.split('::');
-    if (!applicationId || !documentId) continue;
+  for (const row of rows) {
+    const applicationId = String(row.application_id ?? '');
+    const documentId = String(row.document_id ?? '');
+    if (!applicationId || !documentId || row.user_id !== userId) continue;
+    if (desired.has(`${applicationId}::${documentId}` as ApplicationDocumentKey)) continue;
 
-    const { error } = await supabase
-      .from('application_documents')
-      .delete()
-      .eq('user_id', userId)
-      .eq('application_id', applicationId)
-      .eq('document_id', documentId);
-    if (error) errors.push(`application_documents: ${error.message}`);
+    const revision = typeof row.revision === 'number' ? row.revision : null;
+    if (revision === null) {
+      errors.push(`application_documents:${applicationId}:${documentId}: missing revision baseline.`);
+      continue;
+    }
+
+    const key = { application_id: applicationId, document_id: documentId, user_id: userId };
+    const result = await repository.tombstone('application_documents', key, revision);
+    if (!result.error && !result.conflict) continue;
+    if (result.error) {
+      errors.push(`application_documents:${applicationId}:${documentId}: ${result.error}`);
+      continue;
+    }
+
+    const latest = await repository.getByKey<Record<string, unknown>>('application_documents', key);
+    const latestRevision = typeof latest.data?.revision === 'number' ? latest.data.revision : null;
+    if (latest.error || latestRevision === null) {
+      errors.push(`application_documents:${applicationId}:${documentId}: could not rebase tombstone.`);
+      continue;
+    }
+    const retry = await repository.tombstone('application_documents', key, latestRevision);
+    if (retry.error || retry.conflict) errors.push(`application_documents:${applicationId}:${documentId}: tombstone conflict remained.`);
   }
 
   return errors;
@@ -204,23 +215,20 @@ export class AutomaticCloudSync {
   private unsubscribe: Array<() => void> = [];
   private lastSyncedIds: SyncedIds;
   private lastSyncedApplicationDocuments: Set<ApplicationDocumentKey>;
+  private baseline: CloudHydrationSnapshot | null;
 
   constructor(
     private readonly supabase: SupabaseClient,
     private readonly userId: string,
     initialCloudSnapshot?: CloudHydrationSnapshot | null,
   ) {
+    this.baseline = initialCloudSnapshot ?? null;
     this.lastSyncedIds = seedSyncedIds(initialCloudSnapshot);
-    this.lastSyncedApplicationDocuments = new Set(
-      (initialCloudSnapshot?.application_documents ?? []).map(
-        (row) => `${String(row.application_id)}::${String(row.document_id)}` as ApplicationDocumentKey,
-      ),
-    );
+    this.lastSyncedApplicationDocuments = seedApplicationDocuments(initialCloudSnapshot);
   }
 
   start() {
     if (this.stopped) return;
-
     const schedule = () => this.schedule();
     this.unsubscribe.push(useJourneyStore.subscribe(schedule));
     this.unsubscribe.push(useExperimentStore.subscribe(schedule));
@@ -244,6 +252,19 @@ export class AutomaticCloudSync {
     }, SYNC_DEBOUNCE_MS);
   }
 
+  private async ensureBaseline(): Promise<boolean> {
+    if (this.baseline) return true;
+    const cloud = await readCloudHydrationSnapshot(this.supabase);
+    if (cloud.error || !cloud.data) {
+      console.error('[K-Roadmap] Could not establish sync baseline:', cloud.error);
+      return false;
+    }
+    this.baseline = cloud.data;
+    this.lastSyncedIds = seedSyncedIds(cloud.data);
+    this.lastSyncedApplicationDocuments = seedApplicationDocuments(cloud.data);
+    return true;
+  }
+
   private async flush() {
     if (this.stopped) return;
     if (this.syncing) {
@@ -256,9 +277,12 @@ export class AutomaticCloudSync {
       const { data: authData, error: authError } = await this.supabase.auth.getUser();
       if (this.stopped) return;
       if (authError || authData.user?.id !== this.userId) return;
+      if (!(await this.ensureBaseline()) || !this.baseline) return;
 
       const snapshot = buildLocalSnapshot();
-      const result = await importMigrationData(this.supabase, snapshot);
+      const result = await importMigrationData(this.supabase, snapshot, {
+        expectedSnapshot: this.baseline,
+      });
       if (this.stopped) return;
       if (!result.success) {
         console.error('[K-Roadmap] Automatic cloud sync failed:', result.errors);
@@ -266,29 +290,41 @@ export class AutomaticCloudSync {
       }
 
       const desired = desiredIds(snapshot);
-      const deletionResult = await deleteStaleRows(
-        this.supabase,
+      const deletionResult = await tombstoneStaleRows(
+        new CloudRepository(this.supabase),
         this.userId,
-        this.lastSyncedIds,
+        this.baseline,
         desired,
       );
-      const applicationDocumentErrors = await deleteStaleApplicationDocuments(
-        this.supabase,
+      const applicationDocumentErrors = await tombstoneStaleApplicationDocuments(
+        new CloudRepository(this.supabase),
         this.userId,
-        this.lastSyncedApplicationDocuments,
+        this.baseline,
         desiredApplicationDocuments(snapshot),
       );
 
       if (!deletionResult.ok || applicationDocumentErrors.length) {
-        console.error('[K-Roadmap] Automatic cloud cleanup failed:', [
+        console.error('[K-Roadmap] Automatic cloud tombstone cleanup failed:', [
           ...deletionResult.errors,
           ...applicationDocumentErrors,
         ]);
         return;
       }
 
-      this.lastSyncedIds = desired;
-      this.lastSyncedApplicationDocuments = desiredApplicationDocuments(snapshot);
+      const refreshed = await readCloudHydrationSnapshot(this.supabase);
+      if (refreshed.error || !refreshed.data) {
+        console.error('[K-Roadmap] Automatic cloud sync succeeded but refresh failed:', refreshed.error);
+        return;
+      }
+
+      this.baseline = refreshed.data;
+      this.lastSyncedIds = seedSyncedIds(refreshed.data);
+      this.lastSyncedApplicationDocuments = seedApplicationDocuments(refreshed.data);
+
+      // A three-way merge may have preserved fields changed on another device.
+      // Re-apply the authoritative merged cloud snapshot so Zustand cannot
+      // immediately write the stale pre-merge local version back again.
+      applyCloudHydrationSnapshot(refreshed.data, { replaceEmpty: true });
     } finally {
       this.syncing = false;
       if (this.queued && !this.stopped) {

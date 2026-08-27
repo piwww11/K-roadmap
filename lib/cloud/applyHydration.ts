@@ -15,6 +15,10 @@ function rows<T>(snapshot: CloudHydrationSnapshot, table: keyof CloudHydrationSn
   return (snapshot[table] ?? []) as T[];
 }
 
+function hasTable(snapshot: CloudHydrationSnapshot, table: keyof CloudHydrationSnapshot) {
+  return Object.prototype.hasOwnProperty.call(snapshot, table);
+}
+
 function sumSavings(snapshot: CloudHydrationSnapshot): number {
   return rows<Record<string, unknown>>(snapshot, 'saving_transactions').reduce((total, row) => {
     const amount = Number(row.amount);
@@ -22,8 +26,13 @@ function sumSavings(snapshot: CloudHydrationSnapshot): number {
   }, 0);
 }
 
-function normalizeBudgetItems(snapshot: CloudHydrationSnapshot, fallback: BudgetItem[]): BudgetItem[] {
-  const hydrated = rows<Record<string, unknown>>(snapshot, 'budget_items')
+function normalizeBudgetItems(
+  snapshot: CloudHydrationSnapshot,
+  fallback: BudgetItem[],
+  replaceEmpty: boolean,
+): BudgetItem[] {
+  const source = rows<Record<string, unknown>>(snapshot, 'budget_items');
+  const hydrated = source
     .map((row) => payload<Record<string, unknown>>(row))
     .filter((value): value is Record<string, unknown> => value !== null)
     .map((item, index): BudgetItem | null => {
@@ -37,13 +46,16 @@ function normalizeBudgetItems(snapshot: CloudHydrationSnapshot, fallback: Budget
     })
     .filter((value): value is BudgetItem => value !== null);
 
-  return hydrated.length ? hydrated : fallback;
+  if (hydrated.length) return hydrated;
+  if (replaceEmpty && hasTable(snapshot, 'budget_items')) return [];
+  return fallback;
 }
 
-export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
-  applied: boolean;
-  records: number;
-} {
+export function applyCloudHydrationSnapshot(
+  snapshot: CloudHydrationSnapshot,
+  options: { replaceEmpty?: boolean } = {},
+): { applied: boolean; records: number } {
+  const replaceEmpty = options.replaceEmpty ?? false;
   const phaseRows = rows<Record<string, unknown>>(snapshot, 'journey_phases');
   const majorRows = rows<Record<string, unknown>>(snapshot, 'majors');
   const phases = phaseRows.map((row) => payload<Record<string, unknown>>(row)).filter(Boolean);
@@ -51,16 +63,14 @@ export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
   const state = useJourneyStore.getState();
   let records = 0;
 
-  // Journey data is hydrated independently per collection. An empty cloud
-  // collection must not block unrelated cloud data from being applied.
   const cloudExport = {
     myWhy: state.myWhy,
-    phases: phases.length ? phases : state.phases,
-    majors: majors.length ? majors : state.majors,
+    phases: phases.length || (replaceEmpty && hasTable(snapshot, 'journey_phases')) ? phases : state.phases,
+    majors: majors.length || (replaceEmpty && hasTable(snapshot, 'majors')) ? majors : state.majors,
     skills: rows<Record<string, unknown>>(snapshot, 'skills').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
     journalEntries: rows<Record<string, unknown>>(snapshot, 'journal_entries').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
     budget: {
-      items: normalizeBudgetItems(snapshot, state.budget.items),
+      items: normalizeBudgetItems(snapshot, state.budget.items, replaceEmpty),
       targetAmount: Number((snapshot.budget_profiles?.[0] as Record<string, unknown> | undefined)?.target_amount ?? state.budget.targetAmount),
       currentSavings: sumSavings(snapshot),
     } satisfies Budget,
@@ -69,17 +79,19 @@ export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
     majorDecisions: rows<Record<string, unknown>>(snapshot, 'major_decisions').map((row) => payload<Record<string, unknown>>(row)).filter(Boolean),
   };
 
-  const hasJourneyData =
-    phases.length > 0 ||
-    majors.length > 0 ||
-    cloudExport.skills.length > 0 ||
-    cloudExport.journalEntries.length > 0 ||
-    cloudExport.budget.items.length > 0 ||
-    cloudExport.documents.length > 0 ||
-    cloudExport.achievements.length > 0 ||
-    cloudExport.majorDecisions.length > 0 ||
-    Boolean(snapshot.budget_profiles?.length) ||
-    Boolean(snapshot.saving_transactions?.length);
+  const hasJourneyData = replaceEmpty
+    ? ['journey_phases', 'majors', 'skills', 'journal_entries', 'budget_profiles', 'budget_items', 'saving_transactions', 'documents', 'achievements', 'major_decisions']
+        .some((table) => hasTable(snapshot, table as keyof CloudHydrationSnapshot))
+    : phaseRows.length > 0 ||
+      majorRows.length > 0 ||
+      cloudExport.skills.length > 0 ||
+      cloudExport.journalEntries.length > 0 ||
+      cloudExport.budget.items.length > 0 ||
+      cloudExport.documents.length > 0 ||
+      cloudExport.achievements.length > 0 ||
+      cloudExport.majorDecisions.length > 0 ||
+      Boolean(snapshot.budget_profiles?.length) ||
+      Boolean(snapshot.saving_transactions?.length);
 
   if (hasJourneyData && state.importData(JSON.stringify(cloudExport))) {
     records += phases.length + majors.length;
@@ -91,7 +103,7 @@ export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
   const experiments = rows<Record<string, unknown>>(snapshot, 'experiments')
     .map((row) => payload<Experiment>(row))
     .filter((value): value is Experiment => value !== null);
-  if (experiments.length) {
+  if (experiments.length || (replaceEmpty && hasTable(snapshot, 'experiments'))) {
     useExperimentStore.setState({ experiments });
     records += experiments.length;
   }
@@ -99,10 +111,10 @@ export function applyCloudHydrationSnapshot(snapshot: CloudHydrationSnapshot): {
   const applications = rows<Record<string, unknown>>(snapshot, 'applications')
     .map((row) => payload<ApplicationTarget>(row))
     .filter((value): value is ApplicationTarget => value !== null);
-  if (applications.length) {
+  if (applications.length || (replaceEmpty && hasTable(snapshot, 'applications'))) {
     useApplicationTrackerStore.setState({ applications });
     records += applications.length;
   }
 
-  return { applied: records > 0, records };
+  return { applied: records > 0 || replaceEmpty, records };
 }
