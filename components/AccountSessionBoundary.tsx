@@ -6,6 +6,7 @@ import { getSupabaseClient } from '@/lib/supabaseClient';
 import {
   activateAccountScope,
   createScopedStateStorage,
+  syncCurrentScopeToLegacyKeys,
   JOURNEY_STORAGE_KEY,
   EXPERIMENT_STORAGE_KEY,
   APPLICATION_STORAGE_KEY,
@@ -24,16 +25,16 @@ const journeyStorage = createJSONStorage(() => createScopedStateStorage(JOURNEY_
 const experimentStorage = createJSONStorage(() => createScopedStateStorage(EXPERIMENT_STORAGE_KEY));
 const applicationStorage = createJSONStorage(() => createScopedStateStorage(APPLICATION_STORAGE_KEY));
 
-const stores = [
-  useJourneyStore,
-  useExperimentStore,
-  useApplicationTrackerStore,
-] as const;
+function useVolatileStorage() {
+  useJourneyStore.persist.setOptions({ storage: volatileStorage });
+  useExperimentStore.persist.setOptions({ storage: volatileStorage });
+  useApplicationTrackerStore.persist.setOptions({ storage: volatileStorage });
+}
 
-function setStoreStorage(storage: typeof volatileStorage | typeof journeyStorage, index: number) {
-  const target = index === 0 ? journeyStorage : index === 1 ? experimentStorage : applicationStorage;
-  const store = stores[index];
-  store.persist.setOptions({ storage: storage === volatileStorage ? volatileStorage : target });
+function useScopedStorage() {
+  useJourneyStore.persist.setOptions({ storage: journeyStorage });
+  useExperimentStore.persist.setOptions({ storage: experimentStorage });
+  useApplicationTrackerStore.persist.setOptions({ storage: applicationStorage });
 }
 
 export default function AccountSessionBoundary({ children }: { children: ReactNode }) {
@@ -58,20 +59,22 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
 
         // Clear the previous account from memory without writing the reset
         // values into the next account's persistence namespace.
-        stores.forEach((_, index) => setStoreStorage(volatileStorage, index));
+        useVolatileStorage();
         useJourneyStore.getState().resetData();
         useExperimentStore.getState().resetExperiments();
         useApplicationTrackerStore.setState({ applications: [] });
 
         if (cancelledRef.current) return;
 
-        stores.forEach((_, index) => setStoreStorage(journeyStorage, index));
+        useScopedStorage();
 
         await Promise.all([
           useJourneyStore.persist.rehydrate(),
           useExperimentStore.persist.rehydrate(),
           useApplicationTrackerStore.persist.rehydrate(),
         ]);
+
+        syncCurrentScopeToLegacyKeys();
 
         if (cancelledRef.current) return;
         readyRef.current = true;
