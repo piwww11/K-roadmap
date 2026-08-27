@@ -11,6 +11,27 @@ import { normalizeLocalSnapshot, type NormalizedMigrationData } from '@/lib/migr
 const SYNC_DEBOUNCE_MS = 900;
 const DELETE_BATCH_SIZE = 50;
 
+// Children must be removed before their parent rows. This keeps local
+// deletions safe against the foreign keys used by the cloud schema.
+const DELETE_ORDER: DeletableTable[] = [
+  'experiment_reflections',
+  'experiment_attempts',
+  'experiments',
+  'applications',
+  'budget_items',
+  'saving_transactions',
+  'major_decisions',
+  'documents',
+  'achievements',
+  'journal_entries',
+  'journey_tasks',
+  'journey_goals',
+  'journey_months',
+  'journey_phases',
+  'skills',
+  'majors',
+];
+
 type DeletableTable =
   | 'journey_phases'
   | 'journey_months'
@@ -129,7 +150,10 @@ async function deleteStaleRows(
 ): Promise<{ ok: boolean; errors: string[] }> {
   const errors: string[] = [];
 
-  for (const [table, previousIds] of previous) {
+  for (const table of DELETE_ORDER) {
+    const previousIds = previous.get(table);
+    if (!previousIds) continue;
+
     const desiredSet = desired.get(table) ?? new Set<string>();
     const staleIds = [...previousIds].filter((id) => !desiredSet.has(id));
 
