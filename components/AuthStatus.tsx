@@ -53,7 +53,7 @@ export default function AuthStatus() {
   return (
     <div className="mt-3 rounded-xl border border-emerald-500/15 bg-emerald-500/5 p-3">
       <p className="truncate text-[11px] font-semibold text-emerald-300" title={label}>{label}</p>
-      <p className="mt-1 text-[10px] text-slate-600">Cloud sync will be enabled in Phase 2.</p>
+      <p className="mt-1 text-[10px] text-slate-600">Cloud sync is available for this account.</p>
       <button
         type="button"
         disabled={signingOut}
