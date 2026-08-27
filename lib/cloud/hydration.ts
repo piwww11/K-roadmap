@@ -27,9 +27,9 @@ const HYDRATABLE_TABLES: CloudTable[] = [
 ];
 
 /**
- * Reads the authenticated user's cloud snapshot without mutating Zustand.
- * This is deliberately a standalone read boundary; automatic hydration is
- * not wired into the session boundary yet.
+ * Reads the authenticated user's live cloud snapshot without mutating
+ * Zustand. Tombstones remain in Supabase for conflict detection/history but
+ * are intentionally invisible to application hydration.
  */
 export async function readCloudHydrationSnapshot(
   supabase: SupabaseClient,
@@ -50,7 +50,7 @@ export async function readCloudHydrationSnapshot(
 
   const snapshot: CloudHydrationSnapshot = {};
   for (const [table, result] of entries) {
-    snapshot[table] = result.data ?? [];
+    snapshot[table] = (result.data ?? []).filter((row) => !row.deleted_at);
   }
 
   return { data: snapshot, error: null };
