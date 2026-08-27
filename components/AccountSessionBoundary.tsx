@@ -1,0 +1,107 @@
+'use client';
+
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createJSONStorage } from 'zustand/middleware';
+import { getSupabaseClient } from '@/lib/supabaseClient';
+import {
+  activateAccountScope,
+  createScopedStateStorage,
+  JOURNEY_STORAGE_KEY,
+  EXPERIMENT_STORAGE_KEY,
+  APPLICATION_STORAGE_KEY,
+} from '@/lib/accountStorage';
+import { useJourneyStore } from '@/store/useJourneyStore';
+import { useExperimentStore } from '@/store/experimentStore';
+import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
+
+const volatileStorage = createJSONStorage(() => ({
+  getItem: () => null,
+  setItem: () => undefined,
+  removeItem: () => undefined,
+}));
+
+const journeyStorage = createJSONStorage(() => createScopedStateStorage(JOURNEY_STORAGE_KEY));
+const experimentStorage = createJSONStorage(() => createScopedStateStorage(EXPERIMENT_STORAGE_KEY));
+const applicationStorage = createJSONStorage(() => createScopedStateStorage(APPLICATION_STORAGE_KEY));
+
+const stores = [
+  useJourneyStore,
+  useExperimentStore,
+  useApplicationTrackerStore,
+] as const;
+
+function setStoreStorage(storage: typeof volatileStorage | typeof journeyStorage, index: number) {
+  const target = index === 0 ? journeyStorage : index === 1 ? experimentStorage : applicationStorage;
+  const store = stores[index];
+  store.persist.setOptions({ storage: storage === volatileStorage ? volatileStorage : target });
+}
+
+export default function AccountSessionBoundary({ children }: { children: ReactNode }) {
+  const [ready, setReady] = useState(false);
+  const cancelledRef = useRef(false);
+  const transitionQueueRef = useRef(Promise.resolve());
+  const readyRef = useRef(false);
+
+  useEffect(() => {
+    cancelledRef.current = false;
+    const supabase = getSupabaseClient();
+
+    const transition = (userId: string | null) => {
+      transitionQueueRef.current = transitionQueueRef.current.then(async () => {
+        if (cancelledRef.current) return;
+
+        const changed = activateAccountScope(userId);
+        if (!changed && readyRef.current) return;
+
+        readyRef.current = false;
+        setReady(false);
+
+        // Clear the previous account from memory without writing the reset
+        // values into the next account's persistence namespace.
+        stores.forEach((_, index) => setStoreStorage(volatileStorage, index));
+        useJourneyStore.getState().resetData();
+        useExperimentStore.getState().resetExperiments();
+        useApplicationTrackerStore.setState({ applications: [] });
+
+        if (cancelledRef.current) return;
+
+        stores.forEach((_, index) => setStoreStorage(journeyStorage, index));
+
+        await Promise.all([
+          useJourneyStore.persist.rehydrate(),
+          useExperimentStore.persist.rehydrate(),
+          useApplicationTrackerStore.persist.rehydrate(),
+        ]);
+
+        if (cancelledRef.current) return;
+        readyRef.current = true;
+        setReady(true);
+      });
+    };
+
+    void supabase.auth.getSession().then(({ data }) => {
+      transition(data.session?.user.id ?? null);
+    });
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Keep the Supabase callback synchronous; the actual store transition is
+      // serialized outside the auth callback to avoid auth-lock contention.
+      queueMicrotask(() => transition(session?.user.id ?? null));
+    });
+
+    return () => {
+      cancelledRef.current = true;
+      subscription.subscription.unsubscribe();
+    };
+  }, []);
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-sm text-slate-500">
+        Loading your private journey...
+      </div>
+    );
+  }
+
+  return children;
+}
