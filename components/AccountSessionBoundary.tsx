@@ -18,6 +18,7 @@ import { readVerifiedMigrationStatus } from '@/lib/migration/status';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import { useExperimentStore } from '@/store/experimentStore';
 import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
+import { useSyncStatusStore } from '@/store/syncStatusStore';
 
 const volatileStorage = createJSONStorage<any>(() => ({
   getItem: () => null,
@@ -46,12 +47,56 @@ function hasCloudData(snapshot: CloudHydrationSnapshot | null) {
   return Object.values(snapshot).some((rows) => Array.isArray(rows) && rows.length > 0);
 }
 
+function isSyncInFlight(sync: AutomaticCloudSync | null) {
+  if (!sync) return false;
+  return Boolean((sync as unknown as { syncing?: boolean }).syncing);
+}
+
 export default function AccountSessionBoundary({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const cancelledRef = useRef(false);
   const transitionQueueRef = useRef(Promise.resolve());
   const readyRef = useRef(false);
   const syncRef = useRef<AutomaticCloudSync | null>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const statusUnsubscribeRef = useRef<Array<() => void>>([]);
+
+  const clearSyncStatusWatchers = () => {
+    if (statusTimerRef.current) clearInterval(statusTimerRef.current);
+    statusTimerRef.current = null;
+    for (const unsubscribe of statusUnsubscribeRef.current) unsubscribe();
+    statusUnsubscribeRef.current = [];
+  };
+
+  const startSyncStatusWatchers = () => {
+    clearSyncStatusWatchers();
+
+    const markMutation = () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        useSyncStatusStore.getState().setStatus('offline');
+        return;
+      }
+      useSyncStatusStore.getState().setStatus('syncing');
+    };
+
+    statusUnsubscribeRef.current.push(useJourneyStore.subscribe(markMutation));
+    statusUnsubscribeRef.current.push(useExperimentStore.subscribe(markMutation));
+    statusUnsubscribeRef.current.push(useApplicationTrackerStore.subscribe(markMutation));
+
+    statusTimerRef.current = setInterval(() => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        useSyncStatusStore.getState().setStatus('offline');
+        return;
+      }
+
+      const sync = syncRef.current;
+      if (isSyncInFlight(sync)) {
+        useSyncStatusStore.getState().setStatus('syncing');
+      } else if (sync) {
+        useSyncStatusStore.getState().markSynced();
+      }
+    }, 250);
+  };
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -64,10 +109,17 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
         const changed = activateAccountScope(userId);
         if (!changed && readyRef.current) return;
 
+        clearSyncStatusWatchers();
         syncRef.current?.stop();
         syncRef.current = null;
         readyRef.current = false;
         setReady(false);
+
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          useSyncStatusStore.getState().setStatus('offline');
+        } else {
+          useSyncStatusStore.getState().setStatus('synced');
+        }
 
         configureVolatileStorage();
         useJourneyStore.getState().resetData();
@@ -112,6 +164,8 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
           const migrationVerified = Boolean(readVerifiedMigrationStatus(window.localStorage, userId));
           if (migrationVerified || hasCloudData(cloudSnapshot)) {
             syncRef.current = startAutomaticCloudSync(supabase, userId, cloudSnapshot);
+            startSyncStatusWatchers();
+            useSyncStatusStore.getState().markSynced();
           }
         }
 
@@ -130,6 +184,7 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
 
     return () => {
       cancelledRef.current = true;
+      clearSyncStatusWatchers();
       syncRef.current?.stop();
       syncRef.current = null;
       subscription.subscription.unsubscribe();
