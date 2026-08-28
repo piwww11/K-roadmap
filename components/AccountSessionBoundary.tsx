@@ -88,6 +88,19 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
     useSyncStatusStore.getState().setStatus('offline');
   };
 
+  const handleCloudConnectionChange = (connected: boolean) => {
+    if (!connected) {
+      markSyncFailure();
+      return;
+    }
+
+    const current = useSyncStatusStore.getState();
+    if (current.status === 'offline' && syncRef.current) {
+      setSyncing();
+      syncRef.current.requestSync();
+    }
+  };
+
   const startSyncStatusWatchers = () => {
     clearSyncStatusWatchers();
 
@@ -169,8 +182,8 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
               onSyncStart: setSyncing,
               onSyncSuccess: markSyncSuccess,
               onSyncFailure: markSyncFailure,
+              onCloudConnectionChange: handleCloudConnectionChange,
             });
-            useSyncStatusStore.getState().markSynced();
           }
         }
 
