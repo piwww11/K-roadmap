@@ -105,21 +105,12 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
     clearSyncStatusWatchers();
 
     const markMutation = () => setSyncing();
-    const handleOffline = () => markSyncFailure();
 
-    const unsubscribers = [
+    return [
       useJourneyStore.subscribe(markMutation),
       useExperimentStore.subscribe(markMutation),
       useApplicationTrackerStore.subscribe(markMutation),
     ];
-
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      for (const unsubscribe of unsubscribers) unsubscribe();
-      window.removeEventListener('offline', handleOffline);
-      clearSyncStatusWatchers();
-    };
   };
 
   useEffect(() => {
@@ -177,7 +168,8 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
         if (userId && typeof window !== 'undefined') {
           const migrationVerified = Boolean(readVerifiedMigrationStatus(window.localStorage, userId));
           if (migrationVerified || hasCloudData(cloudSnapshot)) {
-            stopStatusWatchers = startSyncStatusWatchers();
+            const unsubscribe = startSyncStatusWatchers();
+            stopStatusWatchers = () => unsubscribe.forEach((dispose) => dispose());
             syncRef.current = startAutomaticCloudSync(supabase, userId, cloudSnapshot, {
               onSyncStart: setSyncing,
               onSyncSuccess: markSyncSuccess,
