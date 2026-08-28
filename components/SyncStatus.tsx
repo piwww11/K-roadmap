@@ -1,14 +1,13 @@
 'use client';
 
 import { useEffect } from 'react';
-import { Check, Cloud, Loader2, WifiOff, XCircle } from 'lucide-react';
+import { Check, Cloud, Loader2, WifiOff } from 'lucide-react';
 import { useSyncStatusStore } from '@/store/syncStatusStore';
 
 const STATUS_COPY = {
   synced: { label: 'Synced', icon: Check },
   syncing: { label: 'Syncing…', icon: Loader2 },
   offline: { label: 'Offline', icon: WifiOff },
-  error: { label: 'Sync error', icon: XCircle },
 } as const;
 
 export default function SyncStatus() {
@@ -54,9 +53,7 @@ export default function SyncStatus() {
             ? 'text-emerald-400'
             : status === 'syncing'
               ? 'text-indigo-300'
-              : status === 'offline'
-                ? 'text-amber-400'
-                : 'text-rose-400'
+              : 'text-amber-400'
         }`}
       >
         <Icon size={12} className={status === 'syncing' ? 'animate-spin' : undefined} />
