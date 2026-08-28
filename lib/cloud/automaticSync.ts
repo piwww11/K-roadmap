@@ -1,17 +1,18 @@
 'use client';
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
 import { useExperimentStore } from '@/store/experimentStore';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import type { CloudHydrationSnapshot } from './hydration';
-import { readCloudHydrationSnapshot } from './hydration';
+import { HYDRATABLE_TABLES, readCloudHydrationSnapshot } from './hydration';
 import { applyCloudHydrationSnapshot } from './applyHydration';
 import { CloudRepository, type CloudTable } from './cloudRepository';
 import { importMigrationData } from '@/lib/migration/importer';
 import { normalizeLocalSnapshot, type NormalizedMigrationData } from '@/lib/migration/normalizer';
 
 const SYNC_DEBOUNCE_MS = 900;
+const REMOTE_HYDRATION_DEBOUNCE_MS = 150;
 
 type DeletableTable = Exclude<CloudTable, 'profiles' | 'application_documents' | 'budget_profiles'>;
 type ApplicationDocumentKey = `${string}::${string}`;
@@ -107,19 +108,6 @@ function seedApplicationDocuments(snapshot: CloudHydrationSnapshot | null | unde
   );
 }
 
-function findBaselineRow(
-  snapshot: CloudHydrationSnapshot,
-  table: CloudTable,
-  key: Record<string, unknown>,
-) {
-  const keys = table === 'application_documents'
-    ? ['application_id', 'document_id']
-    : table === 'budget_profiles'
-      ? ['user_id']
-      : ['id'];
-  return (snapshot[table] ?? []).find((row) => keys.every((column) => row[column] === key[column])) ?? null;
-}
-
 async function tombstoneStaleRows(
   repository: CloudRepository,
   userId: string,
@@ -150,7 +138,6 @@ async function tombstoneStaleRows(
         continue;
       }
 
-      // Delete-vs-update is resolved in v1 by the explicit local deletion.
       const latest = await repository.getByKey<Record<string, unknown>>(table, { id: row.id, user_id: userId });
       const latestRevision = typeof latest.data?.revision === 'number' ? latest.data.revision : null;
       if (latest.error || latestRevision === null) {
@@ -209,9 +196,13 @@ async function tombstoneStaleApplicationDocuments(
 
 export class AutomaticCloudSync {
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private remoteTimer: ReturnType<typeof setTimeout> | null = null;
   private syncing = false;
   private queued = false;
+  private remoteQueued = false;
   private stopped = false;
+  private applyingRemote = false;
+  private realtimeChannel: RealtimeChannel | null = null;
   private unsubscribe: Array<() => void> = [];
   private lastSyncedIds: SyncedIds;
   private lastSyncedApplicationDocuments: Set<ApplicationDocumentKey>;
@@ -233,18 +224,97 @@ export class AutomaticCloudSync {
     this.unsubscribe.push(useJourneyStore.subscribe(schedule));
     this.unsubscribe.push(useExperimentStore.subscribe(schedule));
     this.unsubscribe.push(useApplicationTrackerStore.subscribe(schedule));
+    this.startRealtimeListener();
   }
 
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.remoteTimer) clearTimeout(this.remoteTimer);
     this.timer = null;
+    this.remoteTimer = null;
     for (const unsubscribe of this.unsubscribe) unsubscribe();
     this.unsubscribe = [];
+    if (this.realtimeChannel) {
+      void this.supabase.removeChannel(this.realtimeChannel);
+      this.realtimeChannel = null;
+    }
+  }
+
+  private startRealtimeListener() {
+    if (this.stopped || this.realtimeChannel) return;
+
+    let channel = this.supabase.channel(`cloud-sync:${this.userId}`);
+    for (const table of HYDRATABLE_TABLES) {
+      channel = channel.on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table,
+          filter: `user_id=eq.${this.userId}`,
+        },
+        () => this.scheduleRemoteHydration(),
+      );
+    }
+
+    this.realtimeChannel = channel;
+    void channel.subscribe((status) => {
+      if (status === 'CHANNEL_ERROR') {
+        console.error('[K-Roadmap] Cloud realtime channel error.');
+      }
+    });
+  }
+
+  private scheduleRemoteHydration() {
+    if (this.stopped) return;
+
+    // Never let a remote event overwrite a local mutation that is waiting to
+    // be written. The local CAS write gets first priority; its post-write
+    // snapshot becomes the new authoritative baseline.
+    if (this.syncing || this.timer) {
+      this.remoteQueued = true;
+      return;
+    }
+
+    if (this.remoteTimer) clearTimeout(this.remoteTimer);
+    this.remoteTimer = setTimeout(() => {
+      this.remoteTimer = null;
+      void this.hydrateFromRemote();
+    }, REMOTE_HYDRATION_DEBOUNCE_MS);
+  }
+
+  private async hydrateFromRemote() {
+    if (this.stopped) return;
+    if (this.syncing || this.timer) {
+      this.remoteQueued = true;
+      return;
+    }
+
+    const cloud = await readCloudHydrationSnapshot(this.supabase);
+    if (this.stopped) return;
+    if (cloud.error || !cloud.data) {
+      console.error('[K-Roadmap] Cloud realtime hydration failed:', cloud.error);
+      return;
+    }
+
+    this.baseline = cloud.data;
+    this.lastSyncedIds = seedSyncedIds(cloud.data);
+    this.lastSyncedApplicationDocuments = seedApplicationDocuments(cloud.data);
+
+    // Applying a remote snapshot changes Zustand, which normally triggers the
+    // write subscriber. Suppress that echo because the remote state is already
+    // authoritative in Supabase.
+    this.applyingRemote = true;
+    try {
+      applyCloudHydrationSnapshot(cloud.data, { replaceEmpty: true });
+    } finally {
+      this.applyingRemote = false;
+    }
   }
 
   private schedule() {
-    if (this.stopped) return;
+    if (this.stopped || this.applyingRemote) return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -290,14 +360,10 @@ export class AutomaticCloudSync {
       }
 
       const desired = desiredIds(snapshot);
-      const deletionResult = await tombstoneStaleRows(
-        new CloudRepository(this.supabase),
-        this.userId,
-        this.baseline,
-        desired,
-      );
+      const repository = new CloudRepository(this.supabase);
+      const deletionResult = await tombstoneStaleRows(repository, this.userId, this.baseline, desired);
       const applicationDocumentErrors = await tombstoneStaleApplicationDocuments(
-        new CloudRepository(this.supabase),
+        repository,
         this.userId,
         this.baseline,
         desiredApplicationDocuments(snapshot),
@@ -324,12 +390,21 @@ export class AutomaticCloudSync {
       // A three-way merge may have preserved fields changed on another device.
       // Re-apply the authoritative merged cloud snapshot so Zustand cannot
       // immediately write the stale pre-merge local version back again.
-      applyCloudHydrationSnapshot(refreshed.data, { replaceEmpty: true });
+      this.applyingRemote = true;
+      try {
+        applyCloudHydrationSnapshot(refreshed.data, { replaceEmpty: true });
+      } finally {
+        this.applyingRemote = false;
+      }
     } finally {
       this.syncing = false;
       if (this.queued && !this.stopped) {
         this.queued = false;
         this.schedule();
+      }
+      if (this.remoteQueued && !this.stopped) {
+        this.remoteQueued = false;
+        this.scheduleRemoteHydration();
       }
     }
   }
