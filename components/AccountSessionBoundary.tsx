@@ -49,26 +49,15 @@ function hasCloudData(snapshot: CloudHydrationSnapshot | null) {
   return Object.values(snapshot).some((rows) => Array.isArray(rows) && rows.length > 0);
 }
 
-function isSyncInFlight(sync: AutomaticCloudSync | null) {
-  if (!sync) return false;
-  return Boolean((sync as unknown as { syncing?: boolean }).syncing);
-}
-
 export default function AccountSessionBoundary({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const cancelledRef = useRef(false);
   const transitionQueueRef = useRef(Promise.resolve());
   const readyRef = useRef(false);
   const syncRef = useRef<AutomaticCloudSync | null>(null);
-  const statusTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const statusUnsubscribeRef = useRef<Array<() => void>>([]);
   const syncingSinceRef = useRef<number | null>(null);
 
   const clearSyncStatusWatchers = () => {
-    if (statusTimerRef.current) clearInterval(statusTimerRef.current);
-    statusTimerRef.current = null;
-    for (const unsubscribe of statusUnsubscribeRef.current) unsubscribe();
-    statusUnsubscribeRef.current = [];
     syncingSinceRef.current = null;
   };
 
@@ -78,52 +67,52 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
     if (current.status !== 'syncing') current.setStatus('syncing');
   };
 
-  const maybeMarkSynced = () => {
-    const current = useSyncStatusStore.getState();
+  const markSyncSuccess = () => {
     const syncingSince = syncingSinceRef.current;
-    const elapsed = syncingSince === null ? Number.POSITIVE_INFINITY : Date.now() - syncingSince;
-
-    if (current.status !== 'syncing' || elapsed >= SYNC_STATUS_MIN_VISIBLE_MS) {
+    const elapsed = syncingSince === null ? SYNC_STATUS_MIN_VISIBLE_MS : Date.now() - syncingSince;
+    const finish = () => {
       syncingSinceRef.current = null;
-      current.markSynced();
-    }
-  };
+      useSyncStatusStore.getState().markSynced();
+    };
 
-  const markMutation = () => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      syncingSinceRef.current = null;
-      useSyncStatusStore.getState().setStatus('offline');
+    if (elapsed >= SYNC_STATUS_MIN_VISIBLE_MS) {
+      finish();
       return;
     }
-    setSyncing();
+
+    window.setTimeout(finish, SYNC_STATUS_MIN_VISIBLE_MS - elapsed);
+  };
+
+  const markSyncFailure = () => {
+    syncingSinceRef.current = null;
+    useSyncStatusStore.getState().setStatus('offline');
   };
 
   const startSyncStatusWatchers = () => {
     clearSyncStatusWatchers();
 
-    statusUnsubscribeRef.current.push(useJourneyStore.subscribe(markMutation));
-    statusUnsubscribeRef.current.push(useExperimentStore.subscribe(markMutation));
-    statusUnsubscribeRef.current.push(useApplicationTrackerStore.subscribe(markMutation));
+    const markMutation = () => setSyncing();
+    const handleOffline = () => markSyncFailure();
 
-    statusTimerRef.current = setInterval(() => {
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        syncingSinceRef.current = null;
-        useSyncStatusStore.getState().setStatus('offline');
-        return;
-      }
+    const unsubscribers = [
+      useJourneyStore.subscribe(markMutation),
+      useExperimentStore.subscribe(markMutation),
+      useApplicationTrackerStore.subscribe(markMutation),
+    ];
 
-      const sync = syncRef.current;
-      if (isSyncInFlight(sync)) {
-        setSyncing();
-      } else if (sync) {
-        maybeMarkSynced();
-      }
-    }, 100);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe();
+      window.removeEventListener('offline', handleOffline);
+      clearSyncStatusWatchers();
+    };
   };
 
   useEffect(() => {
     cancelledRef.current = false;
     const supabase = getSupabaseClient();
+    let stopStatusWatchers: (() => void) | null = null;
 
     const transition = (userId: string | null) => {
       transitionQueueRef.current = transitionQueueRef.current.then(async () => {
@@ -132,17 +121,15 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
         const changed = activateAccountScope(userId);
         if (!changed && readyRef.current) return;
 
-        clearSyncStatusWatchers();
+        stopStatusWatchers?.();
+        stopStatusWatchers = null;
         syncRef.current?.stop();
         syncRef.current = null;
         readyRef.current = false;
         setReady(false);
 
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          useSyncStatusStore.getState().setStatus('offline');
-        } else {
-          useSyncStatusStore.getState().setStatus('synced');
-        }
+        useSyncStatusStore.getState().setStatus('synced');
+        syncingSinceRef.current = null;
 
         configureVolatileStorage();
         useJourneyStore.getState().resetData();
@@ -163,10 +150,6 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
 
         let cloudSnapshot: CloudHydrationSnapshot | null = null;
 
-        // Local account-scoped data is loaded first. If this account already
-        // has cloud data, the cloud snapshot becomes the authenticated source
-        // for this hydration pass. An empty cloud account leaves local/guest
-        // data untouched so first-time migration remains possible.
         if (userId) {
           const cloud = await readCloudHydrationSnapshot(supabase);
           if (cancelledRef.current) return;
@@ -178,16 +161,15 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
 
         if (cancelledRef.current) return;
 
-        // Automatic writes are enabled only after an explicit migration has
-        // been verified for this account, or when this account already has
-        // cloud data that has just been hydrated. A brand-new signed-in user
-        // must still use the explicit migration flow before local guest data
-        // can begin writing to the cloud automatically.
         if (userId && typeof window !== 'undefined') {
           const migrationVerified = Boolean(readVerifiedMigrationStatus(window.localStorage, userId));
           if (migrationVerified || hasCloudData(cloudSnapshot)) {
-            syncRef.current = startAutomaticCloudSync(supabase, userId, cloudSnapshot);
-            startSyncStatusWatchers();
+            stopStatusWatchers = startSyncStatusWatchers();
+            syncRef.current = startAutomaticCloudSync(supabase, userId, cloudSnapshot, {
+              onSyncStart: setSyncing,
+              onSyncSuccess: markSyncSuccess,
+              onSyncFailure: markSyncFailure,
+            });
             useSyncStatusStore.getState().markSynced();
           }
         }
@@ -207,7 +189,7 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
 
     return () => {
       cancelledRef.current = true;
-      clearSyncStatusWatchers();
+      stopStatusWatchers?.();
       syncRef.current?.stop();
       syncRef.current = null;
       subscription.subscription.unsubscribe();
