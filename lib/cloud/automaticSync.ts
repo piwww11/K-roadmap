@@ -5,7 +5,7 @@ import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
 import { useExperimentStore } from '@/store/experimentStore';
 import { useJourneyStore } from '@/store/useJourneyStore';
 import type { CloudHydrationSnapshot } from './hydration';
-import { HYDRATABLE_TABLES, readCloudHydationSnapshot } from './hydration';
+import { HYDRATABLE_TABLES, readCloudHydrationSnapshot } from './hydration';
 import { applyCloudHydrationSnapshot } from './applyHydration';
 import { CloudRepository, type CloudTable } from './cloudRepository';
 import { importMigrationData } from '@/lib/migration/importer';
