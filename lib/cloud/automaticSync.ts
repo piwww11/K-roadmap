@@ -18,6 +18,12 @@ type DeletableTable = Exclude<CloudTable, 'profiles' | 'application_documents' |
 type ApplicationDocumentKey = `${string}::${string}`;
 type SyncedIds = Map<DeletableTable, Set<string>>;
 
+type SyncLifecycle = {
+  onSyncStart?: () => void;
+  onSyncSuccess?: () => void;
+  onSyncFailure?: (error: unknown) => void;
+};
+
 const DELETE_ORDER: DeletableTable[] = [
   'experiment_reflections',
   'experiment_attempts',
@@ -212,6 +218,7 @@ export class AutomaticCloudSync {
     private readonly supabase: SupabaseClient,
     private readonly userId: string,
     initialCloudSnapshot?: CloudHydrationSnapshot | null,
+    private readonly lifecycle: SyncLifecycle = {},
   ) {
     this.baseline = initialCloudSnapshot ?? null;
     this.lastSyncedIds = seedSyncedIds(initialCloudSnapshot);
@@ -269,9 +276,6 @@ export class AutomaticCloudSync {
   private scheduleRemoteHydration() {
     if (this.stopped) return;
 
-    // Never let a remote event overwrite a local mutation that is waiting to
-    // be written. The local CAS write gets first priority; its post-write
-    // snapshot becomes the new authoritative baseline.
     if (this.syncing || this.timer) {
       this.remoteQueued = true;
       return;
@@ -302,9 +306,6 @@ export class AutomaticCloudSync {
     this.lastSyncedIds = seedSyncedIds(cloud.data);
     this.lastSyncedApplicationDocuments = seedApplicationDocuments(cloud.data);
 
-    // Applying a remote snapshot changes Zustand, which normally triggers the
-    // write subscriber. Suppress that echo because the remote state is already
-    // authoritative in Supabase.
     this.applyingRemote = true;
     try {
       applyCloudHydrationSnapshot(cloud.data, { replaceEmpty: true });
@@ -343,11 +344,21 @@ export class AutomaticCloudSync {
     }
 
     this.syncing = true;
+    this.lifecycle.onSyncStart?.();
     try {
       const { data: authData, error: authError } = await this.supabase.auth.getUser();
       if (this.stopped) return;
-      if (authError || authData.user?.id !== this.userId) return;
-      if (!(await this.ensureBaseline()) || !this.baseline) return;
+      if (authError || authData.user?.id !== this.userId) {
+        const error = authError ?? new Error('Authenticated user does not match sync account.');
+        console.error('[K-Roadmap] Automatic cloud sync auth check failed:', error);
+        this.lifecycle.onSyncFailure?.(error);
+        return;
+      }
+      if (!(await this.ensureBaseline()) || !this.baseline) {
+        const error = new Error('Could not establish cloud sync baseline.');
+        this.lifecycle.onSyncFailure?.(error);
+        return;
+      }
 
       const snapshot = buildLocalSnapshot();
       const result = await importMigrationData(this.supabase, snapshot, {
@@ -356,6 +367,7 @@ export class AutomaticCloudSync {
       if (this.stopped) return;
       if (!result.success) {
         console.error('[K-Roadmap] Automatic cloud sync failed:', result.errors);
+        this.lifecycle.onSyncFailure?.(result.errors);
         return;
       }
 
@@ -370,16 +382,17 @@ export class AutomaticCloudSync {
       );
 
       if (!deletionResult.ok || applicationDocumentErrors.length) {
-        console.error('[K-Roadmap] Automatic cloud tombstone cleanup failed:', [
-          ...deletionResult.errors,
-          ...applicationDocumentErrors,
-        ]);
+        const errors = [...deletionResult.errors, ...applicationDocumentErrors];
+        console.error('[K-Roadmap] Automatic cloud tombstone cleanup failed:', errors);
+        this.lifecycle.onSyncFailure?.(errors);
         return;
       }
 
       const refreshed = await readCloudHydrationSnapshot(this.supabase);
       if (refreshed.error || !refreshed.data) {
-        console.error('[K-Roadmap] Automatic cloud sync succeeded but refresh failed:', refreshed.error);
+        const error = refreshed.error ?? new Error('Cloud sync succeeded but authoritative refresh failed.');
+        console.error('[K-Roadmap] Automatic cloud sync succeeded but refresh failed:', error);
+        this.lifecycle.onSyncFailure?.(error);
         return;
       }
 
@@ -387,15 +400,16 @@ export class AutomaticCloudSync {
       this.lastSyncedIds = seedSyncedIds(refreshed.data);
       this.lastSyncedApplicationDocuments = seedApplicationDocuments(refreshed.data);
 
-      // A three-way merge may have preserved fields changed on another device.
-      // Re-apply the authoritative merged cloud snapshot so Zustand cannot
-      // immediately write the stale pre-merge local version back again.
       this.applyingRemote = true;
       try {
         applyCloudHydrationSnapshot(refreshed.data, { replaceEmpty: true });
       } finally {
         this.applyingRemote = false;
       }
+      this.lifecycle.onSyncSuccess?.();
+    } catch (error) {
+      console.error('[K-Roadmap] Automatic cloud sync exception:', error);
+      this.lifecycle.onSyncFailure?.(error);
     } finally {
       this.syncing = false;
       if (this.queued && !this.stopped) {
@@ -414,8 +428,9 @@ export function startAutomaticCloudSync(
   supabase: SupabaseClient,
   userId: string,
   initialCloudSnapshot?: CloudHydrationSnapshot | null,
+  lifecycle: SyncLifecycle = {},
 ) {
-  const sync = new AutomaticCloudSync(supabase, userId, initialCloudSnapshot);
+  const sync = new AutomaticCloudSync(supabase, userId, initialCloudSnapshot, lifecycle);
   sync.start();
   return sync;
 }
