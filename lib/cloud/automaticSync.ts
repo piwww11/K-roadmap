@@ -13,6 +13,7 @@ import { normalizeLocalSnapshot, type NormalizedMigrationData } from '@/lib/migr
 
 const SYNC_DEBOUNCE_MS = 900;
 const REMOTE_HYDRATION_DEBOUNCE_MS = 150;
+const CLOUD_REQUEST_TIMEOUT_MS = 10000;
 
 type DeletableTable = Exclude<CloudTable, 'profiles' | 'application_documents' | 'budget_profiles'>;
 type ApplicationDocumentKey = `${string}::${string}`;
@@ -22,6 +23,7 @@ type SyncLifecycle = {
   onSyncStart?: () => void;
   onSyncSuccess?: () => void;
   onSyncFailure?: (error: unknown) => void;
+  onCloudConnectionChange?: (connected: boolean) => void;
 };
 
 const DELETE_ORDER: DeletableTable[] = [
@@ -45,6 +47,22 @@ const DELETE_ORDER: DeletableTable[] = [
 
 function emptySyncedIds(): SyncedIds {
   return new Map();
+}
+
+function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${CLOUD_REQUEST_TIMEOUT_MS}ms.`)), CLOUD_REQUEST_TIMEOUT_MS);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function buildLocalSnapshot(): NormalizedMigrationData {
@@ -234,6 +252,10 @@ export class AutomaticCloudSync {
     this.startRealtimeListener();
   }
 
+  requestSync() {
+    this.schedule();
+  }
+
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
@@ -266,9 +288,15 @@ export class AutomaticCloudSync {
     }
 
     this.realtimeChannel = channel;
-    void channel.subscribe((status) => {
-      if (status === 'CHANNEL_ERROR') {
-        console.error('[K-Roadmap] Cloud realtime channel error.');
+    void channel.subscribe((status, error) => {
+      if (this.stopped) return;
+      if (status === 'SUBSCRIBED') {
+        this.lifecycle.onCloudConnectionChange?.(true);
+        return;
+      }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        console.error('[K-Roadmap] Cloud realtime channel status:', status, error);
+        this.lifecycle.onCloudConnectionChange?.(false);
       }
     });
   }
@@ -295,22 +323,29 @@ export class AutomaticCloudSync {
       return;
     }
 
-    const cloud = await readCloudHydrationSnapshot(this.supabase);
-    if (this.stopped) return;
-    if (cloud.error || !cloud.data) {
-      console.error('[K-Roadmap] Cloud realtime hydration failed:', cloud.error);
-      return;
-    }
-
-    this.baseline = cloud.data;
-    this.lastSyncedIds = seedSyncedIds(cloud.data);
-    this.lastSyncedApplicationDocuments = seedApplicationDocuments(cloud.data);
-
-    this.applyingRemote = true;
     try {
-      applyCloudHydrationSnapshot(cloud.data, { replaceEmpty: true });
-    } finally {
-      this.applyingRemote = false;
+      const cloud = await withTimeout(
+        readCloudHydrationSnapshot(this.supabase),
+        'Realtime cloud hydration',
+      );
+      if (this.stopped) return;
+      if (cloud.error || !cloud.data) {
+        console.error('[K-Roadmap] Cloud realtime hydration failed:', cloud.error);
+        return;
+      }
+
+      this.baseline = cloud.data;
+      this.lastSyncedIds = seedSyncedIds(cloud.data);
+      this.lastSyncedApplicationDocuments = seedApplicationDocuments(cloud.data);
+
+      this.applyingRemote = true;
+      try {
+        applyCloudHydrationSnapshot(cloud.data, { replaceEmpty: true });
+      } finally {
+        this.applyingRemote = false;
+      }
+    } catch (error) {
+      console.error('[K-Roadmap] Cloud realtime hydration request failed:', error);
     }
   }
 
@@ -325,15 +360,23 @@ export class AutomaticCloudSync {
 
   private async ensureBaseline(): Promise<boolean> {
     if (this.baseline) return true;
-    const cloud = await readCloudHydrationSnapshot(this.supabase);
-    if (cloud.error || !cloud.data) {
-      console.error('[K-Roadmap] Could not establish sync baseline:', cloud.error);
+    try {
+      const cloud = await withTimeout(
+        readCloudHydrationSnapshot(this.supabase),
+        'Cloud sync baseline request',
+      );
+      if (cloud.error || !cloud.data) {
+        console.error('[K-Roadmap] Could not establish sync baseline:', cloud.error);
+        return false;
+      }
+      this.baseline = cloud.data;
+      this.lastSyncedIds = seedSyncedIds(cloud.data);
+      this.lastSyncedApplicationDocuments = seedApplicationDocuments(cloud.data);
+      return true;
+    } catch (error) {
+      console.error('[K-Roadmap] Cloud sync baseline request failed:', error);
       return false;
     }
-    this.baseline = cloud.data;
-    this.lastSyncedIds = seedSyncedIds(cloud.data);
-    this.lastSyncedApplicationDocuments = seedApplicationDocuments(cloud.data);
-    return true;
   }
 
   private async flush() {
@@ -346,7 +389,10 @@ export class AutomaticCloudSync {
     this.syncing = true;
     this.lifecycle.onSyncStart?.();
     try {
-      const { data: authData, error: authError } = await this.supabase.auth.getUser();
+      const { data: authData, error: authError } = await withTimeout(
+        this.supabase.auth.getUser(),
+        'Cloud sync authentication request',
+      );
       if (this.stopped) return;
       if (authError || authData.user?.id !== this.userId) {
         const error = authError ?? new Error('Authenticated user does not match sync account.');
@@ -361,9 +407,12 @@ export class AutomaticCloudSync {
       }
 
       const snapshot = buildLocalSnapshot();
-      const result = await importMigrationData(this.supabase, snapshot, {
-        expectedSnapshot: this.baseline,
-      });
+      const result = await withTimeout(
+        importMigrationData(this.supabase, snapshot, {
+          expectedSnapshot: this.baseline,
+        }),
+        'Cloud sync write request',
+      );
       if (this.stopped) return;
       if (!result.success) {
         console.error('[K-Roadmap] Automatic cloud sync failed:', result.errors);
@@ -373,12 +422,18 @@ export class AutomaticCloudSync {
 
       const desired = desiredIds(snapshot);
       const repository = new CloudRepository(this.supabase);
-      const deletionResult = await tombstoneStaleRows(repository, this.userId, this.baseline, desired);
-      const applicationDocumentErrors = await tombstoneStaleApplicationDocuments(
-        repository,
-        this.userId,
-        this.baseline,
-        desiredApplicationDocuments(snapshot),
+      const deletionResult = await withTimeout(
+        tombstoneStaleRows(repository, this.userId, this.baseline, desired),
+        'Cloud sync tombstone cleanup',
+      );
+      const applicationDocumentErrors = await withTimeout(
+        tombstoneStaleApplicationDocuments(
+          repository,
+          this.userId,
+          this.baseline,
+          desiredApplicationDocuments(snapshot),
+        ),
+        'Cloud sync application-document cleanup',
       );
 
       if (!deletionResult.ok || applicationDocumentErrors.length) {
@@ -388,7 +443,10 @@ export class AutomaticCloudSync {
         return;
       }
 
-      const refreshed = await readCloudHydrationSnapshot(this.supabase);
+      const refreshed = await withTimeout(
+        readCloudHydrationSnapshot(this.supabase),
+        'Cloud sync authoritative refresh',
+      );
       if (refreshed.error || !refreshed.data) {
         const error = refreshed.error ?? new Error('Cloud sync succeeded but authoritative refresh failed.');
         console.error('[K-Roadmap] Automatic cloud sync succeeded but refresh failed:', error);
