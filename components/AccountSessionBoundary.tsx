@@ -20,6 +20,8 @@ import { useExperimentStore } from '@/store/experimentStore';
 import { useApplicationTrackerStore } from '@/store/applicationTrackerStore';
 import { useSyncStatusStore } from '@/store/syncStatusStore';
 
+const SYNC_STATUS_MIN_VISIBLE_MS = 450;
+
 const volatileStorage = createJSONStorage<any>(() => ({
   getItem: () => null,
   setItem: () => undefined,
@@ -60,24 +62,44 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
   const syncRef = useRef<AutomaticCloudSync | null>(null);
   const statusTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statusUnsubscribeRef = useRef<Array<() => void>>([]);
+  const syncingSinceRef = useRef<number | null>(null);
 
   const clearSyncStatusWatchers = () => {
     if (statusTimerRef.current) clearInterval(statusTimerRef.current);
     statusTimerRef.current = null;
     for (const unsubscribe of statusUnsubscribeRef.current) unsubscribe();
     statusUnsubscribeRef.current = [];
+    syncingSinceRef.current = null;
+  };
+
+  const setSyncing = () => {
+    syncingSinceRef.current ??= Date.now();
+    const current = useSyncStatusStore.getState();
+    if (current.status !== 'syncing') current.setStatus('syncing');
+  };
+
+  const maybeMarkSynced = () => {
+    const current = useSyncStatusStore.getState();
+    const syncingSince = syncingSinceRef.current;
+    const elapsed = syncingSince === null ? Number.POSITIVE_INFINITY : Date.now() - syncingSince;
+
+    if (current.status !== 'syncing' || elapsed >= SYNC_STATUS_MIN_VISIBLE_MS) {
+      syncingSinceRef.current = null;
+      current.markSynced();
+    }
+  };
+
+  const markMutation = () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      syncingSinceRef.current = null;
+      useSyncStatusStore.getState().setStatus('offline');
+      return;
+    }
+    setSyncing();
   };
 
   const startSyncStatusWatchers = () => {
     clearSyncStatusWatchers();
-
-    const markMutation = () => {
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        useSyncStatusStore.getState().setStatus('offline');
-        return;
-      }
-      useSyncStatusStore.getState().setStatus('syncing');
-    };
 
     statusUnsubscribeRef.current.push(useJourneyStore.subscribe(markMutation));
     statusUnsubscribeRef.current.push(useExperimentStore.subscribe(markMutation));
@@ -85,19 +107,18 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
 
     statusTimerRef.current = setInterval(() => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        syncingSinceRef.current = null;
         useSyncStatusStore.getState().setStatus('offline');
         return;
       }
 
       const sync = syncRef.current;
       if (isSyncInFlight(sync)) {
-        const current = useSyncStatusStore.getState();
-        if (current.status !== 'syncing') current.setStatus('syncing');
+        setSyncing();
       } else if (sync) {
-        const current = useSyncStatusStore.getState();
-        if (current.status !== 'synced') current.markSynced();
+        maybeMarkSynced();
       }
-    }, 250);
+    }, 100);
   };
 
   useEffect(() => {
