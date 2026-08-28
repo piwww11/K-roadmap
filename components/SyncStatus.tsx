@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
 import { Check, Cloud, Loader2, WifiOff } from 'lucide-react';
 import { useSyncStatusStore } from '@/store/syncStatusStore';
 
@@ -13,23 +12,6 @@ const STATUS_COPY = {
 export default function SyncStatus() {
   const status = useSyncStatusStore((state) => state.status);
   const lastSyncedAt = useSyncStatusStore((state) => state.lastSyncedAt);
-
-  useEffect(() => {
-    const handleOnline = () => {
-      const current = useSyncStatusStore.getState().status;
-      if (current === 'offline') useSyncStatusStore.getState().setStatus('synced');
-    };
-    const handleOffline = () => useSyncStatusStore.getState().setStatus('offline');
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    if (!navigator.onLine) handleOffline();
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
 
   const meta = STATUS_COPY[status];
   const Icon = meta.icon;
