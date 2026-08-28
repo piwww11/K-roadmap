@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Check, Cloud, Loader2, WifiOff } from 'lucide-react';
 import { useSyncStatusStore } from '@/store/syncStatusStore';
 
@@ -13,20 +13,13 @@ const STATUS_COPY = {
 export default function SyncStatus() {
   const status = useSyncStatusStore((state) => state.status);
   const lastSyncedAt = useSyncStatusStore((state) => state.lastSyncedAt);
-  const [isOnline, setIsOnline] = useState(
-    () => typeof navigator === 'undefined' || navigator.onLine,
-  );
 
   useEffect(() => {
     const handleOnline = () => {
-      setIsOnline(true);
       const current = useSyncStatusStore.getState().status;
       if (current === 'offline') useSyncStatusStore.getState().setStatus('synced');
     };
-    const handleOffline = () => {
-      setIsOnline(false);
-      useSyncStatusStore.getState().setStatus('offline');
-    };
+    const handleOffline = () => useSyncStatusStore.getState().setStatus('offline');
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -38,9 +31,7 @@ export default function SyncStatus() {
     };
   }, []);
 
-  // Browser connectivity is authoritative for the UX indicator.
-  const displayStatus = isOnline ? status : 'offline';
-  const meta = STATUS_COPY[displayStatus];
+  const meta = STATUS_COPY[status];
   const Icon = meta.icon;
   const title = lastSyncedAt
     ? `Last cloud sync: ${new Date(lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
@@ -58,14 +49,14 @@ export default function SyncStatus() {
       </div>
       <div
         className={`flex items-center gap-1.5 text-[10px] font-semibold ${
-          displayStatus === 'synced'
+          status === 'synced'
             ? 'text-emerald-400'
-            : displayStatus === 'syncing'
+            : status === 'syncing'
               ? 'text-indigo-300'
               : 'text-amber-400'
         }`}
       >
-        <Icon size={12} className={displayStatus === 'syncing' ? 'animate-spin' : undefined} />
+        <Icon size={12} className={status === 'syncing' ? 'animate-spin' : undefined} />
         <span>{meta.label}</span>
       </div>
     </div>
