@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 
-export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
+export type SyncStatus = 'synced' | 'syncing' | 'offline';
 
 type SyncStatusState = {
   status: SyncStatus;
