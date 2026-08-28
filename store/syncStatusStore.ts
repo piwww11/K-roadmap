@@ -12,7 +12,7 @@ type SyncStatusState = {
 };
 
 export const useSyncStatusStore = create<SyncStatusState>((set) => ({
-  status: typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'synced',
+  status: 'synced',
   lastSyncedAt: null,
   setStatus: (status) => set({ status }),
   markSynced: () => set({ status: 'synced', lastSyncedAt: Date.now() }),
