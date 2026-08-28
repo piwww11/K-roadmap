@@ -91,9 +91,11 @@ export default function AccountSessionBoundary({ children }: { children: ReactNo
 
       const sync = syncRef.current;
       if (isSyncInFlight(sync)) {
-        useSyncStatusStore.getState().setStatus('syncing');
+        const current = useSyncStatusStore.getState();
+        if (current.status !== 'syncing') current.setStatus('syncing');
       } else if (sync) {
-        useSyncStatusStore.getState().markSynced();
+        const current = useSyncStatusStore.getState();
+        if (current.status !== 'synced') current.markSynced();
       }
     }, 250);
   };
